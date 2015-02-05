@@ -544,7 +544,7 @@ valid_ttl (hash_t *h, unsigned long now, node_t *p, nid *seat, nid mi, int idx, 
   if (p->expire == 0 || p->expire > now)
     {
       unhold_bucket (p->v, v);
-      return 1; /* caller to go ahead if ttl check meets execption */
+      return 1; /* caller to go ahead if ttl check meets exception */
     }
   if (*seat != mi || !cas (seat, mi, NNULL))
     {

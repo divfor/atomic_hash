@@ -28,7 +28,7 @@
 #include <stdint.h>
 /* atomic_hash_add/get/del finds target bucket and holds on it for your
  * callback functions to read/copy/release bucket data or update ref counter
- * DO NOT spend much time in your callback functions, otherwise performance drops!!!
+ * your callback functions must non-block return as soon as possible, otherwise performance drops!!!
  */
 typedef int (*callback)(void *bucket_data, void *callback_args);
 
@@ -127,6 +127,13 @@ typedef struct hash
   shared unsigned long testidx, teststr_num;
 } hash_t;
 
+/* About TTL (in ms)
+ * if ttl = 0, bucket item will never expire and does not call DTOR_EXPIRED callback function.
+ * if ttl > 0, bucket item will expire by ttl and will be removed by any of hash_add/get/del calls if they see it is expired.
+ * So make sure your DTOR_EXPIRED callback function to release your own data!!!
+ * lookup_reset_ttl: each time a successful lookup by hash_add or hash_get will automatically reset bucket item's expire timer to it;
+ * initial_ttl: set the ttl when adding bucket item to hash table. will not be reset to lookup_reset_ttl if initial_ttl == 0
+*/
 hash_t * atomic_hash_create (size_t max_nodes, unsigned long lookup_reset_ttl, callback dtor[MAX_CALLBACK]);
 int atomic_hash_destroy (hash_t *h);
 int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *dtor_arg);
