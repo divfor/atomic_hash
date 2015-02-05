@@ -5,7 +5,7 @@ read/write/delete conccurrent operations are allowed. 11M ops/s tested in dual X
 
 both of successful and unsuccessful search from the hash table are O(1)
 
-#Define your callback funtions to access hash data in competition area:
+#Define your callback funtions to access hash data quickly
 atomic_hash_add/get/del finds target bucket and holds on it for your callback functions to read/copy/release bucket data or update ref counter. DO NOT spend much time in your callback functions, otherwise performance drops!!!
 
 typedef int (*callback)(void *bucket_data, void *callback_args)
@@ -20,8 +20,20 @@ DTOR_TRY_DEL when deleting and find target bucket, remove/release data in this c
 
 DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callback
 
+hash_t * atomic_hash_create (size_t max_nodes, unsigned long ttl, callback dtor[MAX_CALLBACK])
 
-Installation:
+int atomic_hash_destroy (hash_t *h)
+
+int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int ttl, void *dtor_arg)
+
+int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *dtor_arg)
+
+int atomic_hash_get (hash_t *h, void *key, size_t key_len, void *dtor_arg)
+
+int atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
+
+
+#Installation
 
 Step 1, build dynamic shared libatomic_hash.so: 
 
