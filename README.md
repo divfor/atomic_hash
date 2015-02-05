@@ -6,7 +6,8 @@ read/write/delete conccurrent operations are allowed. 11M ops/s tested in dual X
 both of successful and unsuccessful search from the hash table are O(1)
 
 Install Steps:
-Step 1, build dynamic shared libatomic_hash.so:
+
+Step 1, build dynamic shared libatomic_hash.so: 
 
 cd src && make clean && make
 
