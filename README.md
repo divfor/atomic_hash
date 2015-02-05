@@ -30,7 +30,7 @@ initial_ttl：set the ttl when adding bucket item to hash table. will not be res
 
 #Lib Functions
 
-hash_t * atomic_hash_create (size_t max_nodes, unsigned long lookup_reset_ttl, callback dtor[MAX_CALLBACK])
+hash_t * atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtor[MAX_CALLBACK])
 
 int atomic_hash_destroy (hash_t *h)
 

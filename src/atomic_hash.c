@@ -233,7 +233,7 @@ init_htab (htab_t *ht, unsigned int num, double ratio)
 }
 
 hash_t *
-atomic_hash_create (size_t max_nodes, unsigned long lookup_reset_ttl, callback dtors[])
+atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtors[])
 {
   const double collision = COLLISION; /* collision control, larger is better */
   const size_t max_blocks = MAXBLOCKS;

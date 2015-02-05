@@ -134,7 +134,7 @@ typedef struct hash
  * lookup_reset_ttl: each time a successful lookup by hash_add or hash_get will automatically reset bucket item's expire timer to it;
  * initial_ttl: set the ttl when adding bucket item to hash table. will not be reset to lookup_reset_ttl if initial_ttl == 0
 */
-hash_t * atomic_hash_create (size_t max_nodes, unsigned long lookup_reset_ttl, callback dtor[MAX_CALLBACK]);
+hash_t * atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtor[MAX_CALLBACK]);
 int atomic_hash_destroy (hash_t *h);
 int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *dtor_arg);
 int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *dtor_arg);
