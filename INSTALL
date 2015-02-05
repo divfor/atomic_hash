@@ -8,4 +8,4 @@ Step 2, install libatomic_hash.so to /usr/lib64/ and atomic_hash.h to /usr/inclu
 make install
 
 
-Step 3, include "atomic_hash.h" in your source file(s) and dynamic link atomic_hash lib to your program
+Step 3, include "atomic_hash.h" in your source file(s) and dynamic link atomic_hash lib to your program. see test/makefile as example
