@@ -20,11 +20,18 @@ DTOR_TRY_DEL when deleting and find target bucket, remove/release data in this c
 
 DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callback
 
-hash_t * atomic_hash_create (size_t max_nodes, unsigned long ttl, callback dtor[MAX_CALLBACK])
+#About TTL (in ms)
+if set to 0, bucket item will never expire; if set to >0, bucket item will expire by ttl and will be removed by any of hash_add/get/del calls if they see it is expired. So define your DTOR_EXPIRED callback to release your own data!
+
+lookup_reset_ttl to auto reset bucket's ttl each time there is a successful lookup in hash_add or hash_get
+
+initial_ttl only set the ttl
+
+hash_t * atomic_hash_create (size_t max_nodes, unsigned long lookup_reset_ttl, callback dtor[MAX_CALLBACK])
 
 int atomic_hash_destroy (hash_t *h)
 
-int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int ttl, void *dtor_arg)
+int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *dtor_arg)
 
 int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *dtor_arg)
 
