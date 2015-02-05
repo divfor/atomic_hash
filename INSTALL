@@ -3,7 +3,7 @@ Step 1, build dynamic shared libatomic_hash.so:
 cd src && make clean && make
 
 
-Step 2, copy libatomic_hash.so to /usr/lib64/ and atomic_hash.h to /usr/include/
+Step 2, install libatomic_hash.so to /usr/lib64/ and atomic_hash.h to /usr/include/
 
 make install
 
