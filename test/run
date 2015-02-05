@@ -1,0 +1,14 @@
+#!/bin/sh
+
+target=${1:-'hs'}
+
+( cd ../src && make clean && make uninstall && make && make install )
+mkfile="./makefile"
+exe=$(awk '/^EXECUTABLE/{print $NF}' ./makefile);
+
+make clean && make && rm -rf *.o *.d gmon.out
+./$exe $target; 
+
+if grep ^LINKFLAGS $mkfile | grep -qs '\-pg'; then
+  gprof -b ./$exe gmon.out | less
+fi
