@@ -6,7 +6,8 @@ read/write/delete conccurrent operations are allowed. 11M ops/s tested in dual X
 both of successful and unsuccessful search from the hash table are O(1)
 
 #Define your callback funtions to access hash data quickly
-atomic_hash_add/get/del finds target bucket and holds on it for your callback functions to read/copy/release bucket data or update ref counter. DO NOT spend much time in your callback functions, otherwise performance drops!!!
+
+atomic_hash_add/get/del finds target bucket and holds on it for your callback functions to read/copy/release bucket data or update ref counter. your callback functions must non-block return as soon as possible, otherwise performance drops!!!
 
 typedef int (*callback)(void *bucket_data, void *callback_args)
 
@@ -21,11 +22,11 @@ DTOR_TRY_DEL when deleting and find target bucket, remove/release data in this c
 DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callback
 
 #About TTL (in ms)
-if ttl == 0, bucket item will never expire and does not call DTOR_EXPIRED callback function; if ttl > 0, bucket item will expire by ttl end and will be removed by any of hash_add/get/del calls if they see it is expired. So define your DTOR_EXPIRED callback to release your own data for this!!!
+if ttl = 0, bucket item will never expire and does not call DTOR_EXPIRED callback function. if ttl > 0, bucket item will expire by ttl and will be removed by any of hash_add/get/del calls if they see it is expired. So make sure your DTOR_EXPIRED callback function to release your own data!!!
 
-lookup_reset_ttl to auto reset bucket's ttl each time there is a successful lookup in hash_add or hash_get
+lookup_reset_ttl: each time a successful lookup by hash_add or hash_get will automatically reset bucket item's expire timer to it.
 
-initial_ttl only set the ttl when add the bucket item
+initial_ttl：set the ttl when adding bucket item to hash table. will not be reset to lookup_reset_ttl if initial_ttl == 0.
 
 #Lib Functions
 
