@@ -233,7 +233,7 @@ init_htab (htab_t *ht, unsigned int num, double ratio)
 }
 
 hash_t *
-atomic_hash_create (size_t max_nodes, unsigned long ttl, callback dtors[])
+atomic_hash_create (size_t max_nodes, unsigned long lookup_reset_ttl, callback dtors[])
 {
   const double collision = COLLISION; /* collision control, larger is better */
   const size_t max_blocks = MAXBLOCKS;
@@ -271,7 +271,7 @@ atomic_hash_create (size_t max_nodes, unsigned long ttl, callback dtors[])
   if (dtors)
     for (j = 0; j < MAX_CALLBACK; j++)
        h->dtor[j] = dtors[j];
-  h->reset_expire = ttl;
+  h->reset_expire = lookup_reset_ttl;
   h->nmht = NMHT;
   h->ncmp = NCMP;
   h->nkey = NKEY;                 /* uint32_t # of hash function's output */
@@ -600,7 +600,7 @@ valid_ttl (hash_t *h, unsigned long now, node_t *p, nid *seat, nid mi, int idx, 
 
 #define idx(j) (j<(NCLUSTER*NKEY)?0:1)
 int
-atomic_hash_add (hash_t *h, void *kwd, size_t len, void *data, int ttl, void *arg)
+atomic_hash_add (hash_t *h, void *kwd, size_t len, void *data, int initial_ttl, void *arg)
 {
   register unsigned int i, j;
   register nid mi;
@@ -625,7 +625,7 @@ atomic_hash_add (hash_t *h, void *kwd, size_t len, void *data, int ttl, void *ar
   if (ni == NNULL && (ni = new_node (h)) == NNULL)
     return -2;
   p = i2p (h->mp, node_t, ni);
-  set_hash_node (p, t.v, data, (ttl>0 ? ttl+now : 0));
+  set_hash_node (p, t.v, data, (initial_ttl>0 ? initial_ttl+now : 0));
   for (j = 0; j < NSEAT; j++)
     if (*a[j] == NNULL && try_add (h, p, a[j], ni, idx(j), arg))
       return 0;
