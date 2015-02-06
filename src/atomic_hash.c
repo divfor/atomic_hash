@@ -621,7 +621,7 @@ atomic_hash_add (hash_t *h, void *kwd, size_t len, void *data, int initial_ttl, 
     if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && i--)
       if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, &ni))
         if (likely_equal (p->v, t.v) && try_hit (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
-	  return 0;
+	      return 0;
   if (ni == NNULL && (ni = new_node (h)) == NNULL)
     return -2;
   p = i2p (h->mp, node_t, ni);
@@ -632,7 +632,7 @@ atomic_hash_add (hash_t *h, void *kwd, size_t len, void *data, int initial_ttl, 
   if (h->ht[NMHT].ncur < MINTAB)
     for (j = 0; j < MINTAB; j++)
       if (h->ht[NMHT].b[j] == NNULL && try_add (h, p, &h->ht[NMHT].b[j], ni, NMHT, arg))
-	return 0;
+	    return 0;
   memset (p, 0, sizeof (*p));
   free_node (h, ni);
   add1 (h->stats.add_nosit);
@@ -655,12 +655,12 @@ atomic_hash_get (hash_t *h, void *kwd, size_t len, void *arg)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
       if (valid_ttl (h, now, p, a[j], mi, idx(j), arg, NULL))
         if (likely_equal (p->v, t.v) && try_get (h, t.v, p, a[j], mi, idx(j), arg))
-	  return 0;
+	      return 0;
   for (j = i = 0; i < h->ht[NMHT].ncur && j < MINTAB; j++)
     if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && ++i)
       if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, NULL))
         if (likely_equal (p->v, t.v) && try_get (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
-	  return 0;
+	      return 0;
   add1 (h->stats.get_nohit);
   return -1;
 }
@@ -681,14 +681,14 @@ atomic_hash_del (hash_t *h, void *kwd, size_t len, void *arg)
   for (j = 0; j < NSEAT; j++)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
       if (valid_ttl (h, now, p, a[j], mi, idx(j), arg, NULL))
-	if (likely_equal (p->v, t.v) && try_del (h, t.v, p, a[j], mi, idx(j), arg))
-	  i++;
+	    if (likely_equal (p->v, t.v) && try_del (h, t.v, p, a[j], mi, idx(j), arg))
+	      i++;
   if (h->ht[NMHT].ncur > 0)
     for (j = 0; j < MINTAB; j++)
       if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
         if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, NULL))
-	  if (likely_equal (p->v, t.v) && try_del (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
-	    i++;
+	      if (likely_equal (p->v, t.v) && try_del (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
+	        i++;
   if (i > 0)
     return 0;
   add1 (h->stats.del_nohit);
