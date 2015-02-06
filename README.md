@@ -4,11 +4,16 @@ atomic hash is a lock-free hash table designed for multiple threads to share a c
 By giving max hash item number and expected collision rate, atomic_hash calculates two load factors and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving. Both of successful and unsuccessful search from the hash table are O(1)
 
 # Usage
-Define your callback funtions to access hash data in non-blocking mode
+Define your callback funtions to access hash data in non-blocking mode:
+
+typedef int (*callback)(void *bucket_data, void *callback_args)
+
+bucket_data: input to callback function pointing to user data structure linked to current hash node
+
+callback_args: output of callback function, may also take input role together
 
 atomic_hash_add/get/del finds target bucket and holds on it for your callback functions to read/copy/release bucket data or update ref counter. your callback functions must be non-blocking and return as soon as possible, otherwise performance drops remarkablly.
 
-typedef int (*callback)(void *bucket_data, void *callback_args)
 
 DTOR_TRY_HIT when adding but find target exists, return/memcpy data or update ref counter in this callback
 
