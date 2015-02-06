@@ -35,9 +35,9 @@ DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callb
 
 Example:
 
-callback dtor[] = {DTOR_TRY_HIT_func, DTOR_TRY_ADD_func, DTOR_TRY_GET_func, DTOR_TRY_DEL_func, DTOR_EXPIRED_func};
+callback dtor[] = {NULL, NULL, DTOR_TRY_GET_func, DTOR_TRY_DEL_func, NULL};
 
-ph = atomic_hash_create (num_strings, TTL_ON_AUTO_RESET, dtor);
+ph = atomic_hash_create (max_nodes_num, 0, dtor);
 
 #About TTL
 TTL (in milliseconds) is designed to enable expire feature in hash table as a cache. Set 'lookup_reset_ttl' to 0 to disable this feature so that all hash items never expire. If lookup_reset_ttl is set to >0, you still can set 'initial_ttl' to 0 to mark hash items that never expire.
