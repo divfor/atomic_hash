@@ -23,13 +23,13 @@ typedef int (*callback)(void *bucket_data, void *callback_args)
 
 here 'bucket_data' is the input to callback function copied from 'hash_node->data' (generally a pointer to the user data structure), and 'callback_args' is output of callback function which may also take call-time input role together. It is the callback functions to take responsiblity of releasing user data. If it does it successfully, it should return 0 to tell atomic_hash to remove current hash node, otherwise, it should return non-zero. There are 5 callback functions you may want to define:
 
-DTOR_TRY_HIT_func: atomic_hash_add will call it when find the adding hash key exists, generally define NULL func for it if you do not want to do value/data copying or ref counter updating;
+DTOR_TRY_HIT_func: atomic_hash_add will call it when the adding item's hash key exists, generally define NULL func for it if you do not want to do value/data copying or ref counter updating;
 
-DTOR_TRY_ADD_func: atomic_hash_add will call it when link new hash node to an empty bucket, generally define NULL func for it;
+DTOR_TRY_ADD_func: atomic_hash_add will call it when adding new item, generally define NULL func for it;
 
-DTOR_TRY_GET_func: atomic_hash_get will call it when find a target. do value/data copy or updating data in it;
+DTOR_TRY_GET_func: atomic_hash_get will call it once find target. do value/data copy or updating data in it;
 
-DTOR_TRY_DEL_func: atomic_hash_del call it to release user data and then remove current hash node;
+DTOR_TRY_DEL_func: atomic_hash_del will call it to release user data;
 
 DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callback
 
