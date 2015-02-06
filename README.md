@@ -6,7 +6,9 @@ By giving max hash item number and expected collision rate, atomic_hash calculat
 # Usage
 atomic_hash_add/get/del finds target bucket and holds on it for your callback functions to read/copy/release bucket data or update ref counter. your callback functions must be non-blocking and return as soon as possible, otherwise performance drops remarkablly. Define your callback funtions to access hash data in non-blocking mode: 
 
-typedef int (*callback)(void *bucket_data, void *callback_args), here bucket_data is the input to callback function pointing to user data structure linked to current hash node, and callback_args is output of your callback function which may also take input role together. If callback function has released the hash data, it should return 0 to tell atomic_hash to release that hash node, otherwise, must return non-zero. There are 5 callback functions you may want to define:
+typedef int (*callback)(void *bucket_data, void *callback_args)
+
+here bucket_data is the input to callback function (target hash node's data field, generally a pointer to the user data structure), and callback_args is output of callback function which may also take input role together. It is the callback functions to take responsiblity of releasing user data. If it does it successfully, it should return 0 to tell atomic_hash to remove current hash node, otherwise, must return non-zero. There are 5 callback functions you may want to define:
 
 DTOR_TRY_HIT_func: atomic_hash_add will call it when find the adding hash key exists, generally define NULL func for it if you do not want to do value/data copying or ref counter updating;
 
@@ -17,6 +19,8 @@ DTOR_TRY_GET_func: atomic_hash_get will call it when find a target. do value/dat
 DTOR_TRY_DEL_func: atomic_hash_del call it to release user data and then remove current hash node;
 
 DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callback
+
+Example:
 
 callback dtor[] = {DTOR_TRY_HIT_func, DTOR_TRY_ADD_func, DTOR_TRY_GET_func, DTOR_TRY_DEL_func, DTOR_EXPIRED_func};
 
