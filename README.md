@@ -39,14 +39,14 @@ callback dtor[] = {DTOR_TRY_HIT_func, DTOR_TRY_ADD_func, DTOR_TRY_GET_func, DTOR
 
 ph = atomic_hash_create (num_strings, TTL_ON_AUTO_RESET, dtor);
 
-#About TTL in Hash Node
-TTL (in milliseconds) is designed to enable expire feature to hash items that often is required when take the hash table as a cache. You can set 'lookup_reset_ttl' to 0 to disable this feature so that all items will never expire. when lookup_reset_ttl > 0, you still can set 'initial_ttl' to 0 to mark items that never expires.
+#About TTL
+TTL (in milliseconds) is designed to enable expire feature in hash table as a cache. Set 'lookup_reset_ttl' to 0 to disable this feature so that all hash items never expire. If lookup_reset_ttl is set to >0, you still can set 'initial_ttl' to 0 to mark hash items that never expire.
 
-if hash_node->expire == 0, the item will never expire and does not call DTOR_EXPIRED callback function. if hash_node->expire > 0, the item will timeout when current time > hash_node->expire, and after this, this bucket item may be removed by any of hash add/get/del calls that sees it. So release your own data in your DTOR_EXPIRED callback function!!!
+lookup_reset_ttl: each successful lookup by atomic_hash_add or atomic_hash_get will automatically reset target item's hash_node->expire to (now + lookup_reset_ttl).
 
-lookup_reset_ttl: each successful lookup by atomic_hash_add or atomic_hash_get will automatically reset bucket item's expire timer to (now + lookup_reset_ttl).
+initial_ttl：new item's hash_noe->expire is set to (now + initial_ttl) when adding to hash table. this item's hash_node->expire will NOT be reset to (now + lookup_reset_ttl) if initial_ttl == 0.
 
-initial_ttl：set bucket's expire time as now + ttl when adding bucket item to hash table. bucket's expire time will NOT be reset with lookup_reset_ttl if initial_ttl == 0.
+if a item's hash_node->expire == 0, atomic_hash will never call DTOR_EXPIRED callback function for this item. if hash_node->expire > 0, the item will expire when now > hash_node->expire, and after that time, this bucket item may be removed by any of hash add/get/del calls that traverses it (this also means, no active cleanup thread to clear expired item). So release your own data in your DTOR_EXPIRED callback function!!!
 
 #Installation
 
