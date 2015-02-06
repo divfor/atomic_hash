@@ -8,13 +8,15 @@ hash_t * atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dt
 
 int atomic_hash_destroy (hash_t *h)
 
-int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *callback_arg)
+int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *callback_arg) /* add non-dup */
 
-int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *callback_arg)
+int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *callback_arg) /* del all matches */
 
-int atomic_hash_get (hash_t *h, void *key, size_t key_len, void *callback_arg)
+int atomic_hash_get (hash_t *h, void *key, size_t key_len, void *callback_arg) /* get first match */
 
 int atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
+
+return (int): 0 for successful operation and non-zero for unsuccessful operation
 
 # Usage
 atomic_hash_add/get/del finds target bucket and holds on it for callback functions to read/copy/release user data or update ref counter. callback functions must be non-blocking to return as soon as possible, otherwise performance drops remarkablly. Define your callback funtions to access user data: 
