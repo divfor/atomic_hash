@@ -4,24 +4,17 @@ atomic hash is a lock-free hash table designed for multiple threads to share a c
 By giving max hash item number and expected collision rate, atomic_hash calculates two load factors and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving. Both of successful and unsuccessful search from the hash table are O(1)
 
 # Usage
-Define your callback funtions to access hash data in non-blocking mode:
+atomic_hash_add/get/del finds target bucket and holds on it for your callback functions to read/copy/release bucket data or update ref counter. your callback functions must be non-blocking and return as soon as possible, otherwise performance drops remarkablly. Define your callback funtions to access hash data in non-blocking mode: 
 
-typedef int (*callback)(void *bucket_data, void *callback_args)
+typedef int (*callback)(void *bucket_data, void *callback_args), here bucket_data is the input to callback function pointing to user data structure linked to current hash node, and callback_args is output of your callback function which may also take input role together. If callback function has released the hash data, it should return 0 to tell atomic_hash to release that hash node, otherwise, must return non-zero. There are 5 callback functions you may want to define:
 
-bucket_data: input to callback function pointing to user data structure linked to current hash node
+DTOR_TRY_HIT_func: atomic_hash_add will call it when find the adding hash key exists, generally define NULL func for it if you do not want to do value/data copying or ref counter updating;
 
-callback_args: output of callback function, may also take input role together
+DTOR_TRY_ADD_func: atomic_hash_add will call it when link new hash node to an empty bucket, generally define NULL func for it;
 
-atomic_hash_add/get/del finds target bucket and holds on it for your callback functions to read/copy/release bucket data or update ref counter. your callback functions must be non-blocking and return as soon as possible, otherwise performance drops remarkablly.
+DTOR_TRY_GET_func: atomic_hash_get will call it when find a target. do value/data copy or updating data in it;
 
-
-DTOR_TRY_HIT when adding but find target exists, return/memcpy data or update ref counter in this callback
-
-DTOR_TRY_ADD whey adding and find an empty bucket, attach data in this callback
-
-DTOR_TRY_GET when looking up and find the target bucket, return/memcpy data or update ref counter in this callback
-
-DTOR_TRY_DEL when deleting and find target bucket, remove/release data in this callback
+DTOR_TRY_DEL_func: atomic_hash_del call it to release user data and then remove current hash node;
 
 DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callback
 
