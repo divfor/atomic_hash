@@ -39,8 +39,10 @@ callback dtor[] = {DTOR_TRY_HIT_func, DTOR_TRY_ADD_func, DTOR_TRY_GET_func, DTOR
 
 ph = atomic_hash_create (num_strings, TTL_ON_AUTO_RESET, dtor);
 
-#About TTL (in ms) of Bucket Item
-if ttl == 0, bucket item will never expire and does not call DTOR_EXPIRED callback function. if ttl > 0, bucket item will timeout after ttl, and this bucket item may be removed by any of hash add/get/del calls that sees it. So release your own data in your DTOR_EXPIRED callback function!!!
+#About TTL in Hash Node
+TTL (in milliseconds) is designed to enable expire feature to hash items that often is required when take the hash table as a cache. You can set 'lookup_reset_ttl' to 0 to disable this feature so that all items will never expire. when lookup_reset_ttl > 0, you still can set 'initial_ttl' to 0 to mark items that never expires.
+
+if hash_node->expire == 0, the item will never expire and does not call DTOR_EXPIRED callback function. if hash_node->expire > 0, the item will timeout when current time > hash_node->expire, and after this, this bucket item may be removed by any of hash add/get/del calls that sees it. So release your own data in your DTOR_EXPIRED callback function!!!
 
 lookup_reset_ttl: each successful lookup by atomic_hash_add or atomic_hash_get will automatically reset bucket item's expire timer to (now + lookup_reset_ttl).
 
