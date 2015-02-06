@@ -1,14 +1,14 @@
 # Summary
-atomic hash is a lock-free hash table designed for multiple threads to share a cache or data structure. It allows multiple threads to concurrent read/write/delete hash items without locks. 5M~20M ops/s can be performed in morden computer platform.
+atomic hash is a lock-free hash table designed for multiple threads to share cache or data with up to 2^32 items. It allows multiple threads to concurrent read/write/delete hash items without locks. 5M~20M ops/s can be performed in morden computer platform.
 
 By giving max hash item number and expected collision rate, atomic_hash calculates two load factors and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving. Both of successful and unsuccessful search from the hash table are O(1)
 
 # Usage
-atomic_hash_add/get/del finds target bucket and holds on it for your callback functions to read/copy/release bucket data or update ref counter. your callback functions must be non-blocking and return as soon as possible, otherwise performance drops remarkablly. Define your callback funtions to access hash data in non-blocking mode: 
+atomic_hash_add/get/del finds target bucket and holds on it for callback functions to read/copy/release user data or update ref counter. callback functions must be non-blocking to return as soon as possible, otherwise performance drops remarkablly. Define your callback funtions to access user data: 
 
 typedef int (*callback)(void *bucket_data, void *callback_args)
 
-here bucket_data is the input to callback function (target hash node's data field, generally a pointer to the user data structure), and callback_args is output of callback function which may also take input role together. It is the callback functions to take responsiblity of releasing user data. If it does it successfully, it should return 0 to tell atomic_hash to remove current hash node, otherwise, must return non-zero. There are 5 callback functions you may want to define:
+here 'bucket_data' is the input to callback function copied from 'hash_node->data' (generally a pointer to the user data structure), and 'callback_args' is output of callback function which may also take call-time input role together. It is the callback functions to take responsiblity of releasing user data. If it does it successfully, it should return 0 to tell atomic_hash to remove current hash node, otherwise, it should return non-zero. There are 5 callback functions you may want to define:
 
 DTOR_TRY_HIT_func: atomic_hash_add will call it when find the adding hash key exists, generally define NULL func for it if you do not want to do value/data copying or ref counter updating;
 
