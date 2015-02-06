@@ -21,12 +21,12 @@ DTOR_TRY_DEL when deleting and find target bucket, remove/release data in this c
 
 DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callback
 
-#About TTL (in ms)
-if ttl = 0, bucket item will never expire and does not call DTOR_EXPIRED callback function. if ttl > 0, bucket item will expire by ttl and will be removed by any of hash_add/get/del calls if they see it is expired. So make sure your DTOR_EXPIRED callback function to release your own data!!!
+#About TTL (in ms) of Bucket Item
+if ttl == 0, bucket item will never expire and does not call DTOR_EXPIRED callback function. if ttl > 0, bucket item will timeout after ttl, and this bucket item may be removed by any of hash add/get/del calls that sees it. So release your own data in your DTOR_EXPIRED callback function!!!
 
-lookup_reset_ttl: each time a successful lookup by hash_add or hash_get will automatically reset bucket item's expire timer to it.
+lookup_reset_ttl: each successful lookup by atomic_hash_add or atomic_hash_get will automatically reset bucket item's expire timer to (now + lookup_reset_ttl).
 
-initial_ttl：set the ttl when adding bucket item to hash table. will not be reset to lookup_reset_ttl if initial_ttl == 0.
+initial_ttl：set bucket's expire time as now + ttl when adding bucket item to hash table. bucket's expire time will NOT be reset with lookup_reset_ttl if initial_ttl == 0.
 
 #Lib Functions
 
