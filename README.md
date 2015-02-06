@@ -3,6 +3,19 @@ atomic hash is a lock-free hash table designed for multiple threads to share cac
 
 By giving max hash item number and expected collision rate, atomic_hash calculates two load factors and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving. Both of successful and unsuccessful search from the hash table are O(1)
 
+#Hash Functions
+hash_t * atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtor[MAX_CALLBACK])
+
+int atomic_hash_destroy (hash_t *h)
+
+int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *callback_arg)
+
+int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *callback_arg)
+
+int atomic_hash_get (hash_t *h, void *key, size_t key_len, void *callback_arg)
+
+int atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
+
 # Usage
 atomic_hash_add/get/del finds target bucket and holds on it for callback functions to read/copy/release user data or update ref counter. callback functions must be non-blocking to return as soon as possible, otherwise performance drops remarkablly. Define your callback funtions to access user data: 
 
@@ -32,21 +45,6 @@ if ttl == 0, bucket item will never expire and does not call DTOR_EXPIRED callba
 lookup_reset_ttl: each successful lookup by atomic_hash_add or atomic_hash_get will automatically reset bucket item's expire timer to (now + lookup_reset_ttl).
 
 initial_ttl：set bucket's expire time as now + ttl when adding bucket item to hash table. bucket's expire time will NOT be reset with lookup_reset_ttl if initial_ttl == 0.
-
-#Lib Functions
-
-hash_t * atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtor[MAX_CALLBACK])
-
-int atomic_hash_destroy (hash_t *h)
-
-int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *dtor_arg)
-
-int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *dtor_arg)
-
-int atomic_hash_get (hash_t *h, void *key, size_t key_len, void *dtor_arg)
-
-int atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
-
 
 #Installation
 
