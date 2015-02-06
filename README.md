@@ -33,9 +33,9 @@ DTOR_TRY_GET_func: atomic_hash_get will call it once find target. do value/data 
 
 DTOR_TRY_DEL_func: atomic_hash_del will call it to release user data;
 
-DTOR_EXPIRED when detecting an expired bucket, remove/release data in this callback
+DTOR_EXPIRED_func: any of atomic_hash_add/get/del will call it when detecting an expired item. do remove/release user data in it;
 
-Example:
+For example,
 
 callback dtor[] = {NULL, NULL, DTOR_TRY_GET_func, DTOR_TRY_DEL_func, NULL};
 
