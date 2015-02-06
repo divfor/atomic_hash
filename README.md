@@ -1,9 +1,7 @@
-# atomic_hash
-a lock-free hash table designed for multiple threads to share a cache or data structure without lock API calls
+# Summary
+atomic hash is a lock-free hash table designed for multiple threads to share a cache or data structure without lock API calls. it allows multiple threads to concurrent read/write/delete hash items without locks. From dual Xeon E5-2650 CPU platform 11M ops/s can be made. 
 
-read/write/delete conccurrent operations are allowed. 11M ops/s tested in dual Xeon E5-2650 CPU
-
-both of successful and unsuccessful search from the hash table are O(1)
+By specifying max hash item number and expected collision rate, atomic_hash creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is designed for high performance and memory saving. Both of successful and unsuccessful search from the hash table are O(1)
 
 #Define your callback funtions to access hash data quickly
 
