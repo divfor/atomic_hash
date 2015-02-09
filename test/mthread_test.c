@@ -20,8 +20,8 @@
 
 #define time_after(a,b) ((b) > (a) || (long)(b) - (long)(a) < 0)
 #define time_before(a,b)  time_after(b,a)
-#define TTL_ON_ADD 0
-#define TTL_ON_CREATE 0
+#define TTL_ON_ADD 100
+#define TTL_ON_CREATE 300
 
 typedef struct teststr {
   char *s;
@@ -36,12 +36,26 @@ now ()
   return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
 }
 
-int
-do_anything (void *data, void *arg)
+int cb_get (void *data, void *arg)
 {
-  unsigned long i;
-  for (i = mt_rand () % 10000; i > 0; i--);
-  return mt_rand () % 2;
+  char * buf = strdup(data);
+  free (buf);
+  return 1;
+}
+
+int cb_del (void *data, void *arg)
+{
+  char * buf = strdup(data);
+  free (buf);
+  return 0;
+}
+
+int cb_random_loop (void *data, void *arg)
+{
+  unsigned long i, j = 0;
+  //struct timeval tv;  gettimeofday (&tv, NULL);  usleep (tv.tv_usec % 1000);
+  for (i = mt_rand () % 10000; i > 0; i--) j += i;
+  return j % 2;
 }
 
 void *
@@ -161,8 +175,8 @@ main (int argc, char **argv)
   fclose (fp);
   printf ("%ld lines to memory.\n", num_strings);
 
-  //callback dtor[MAX_CALLBACK] = {do_anything, do_anything, do_anything, do_anything, NULL};
-  callback dtor[] = {NULL, NULL, NULL, NULL, NULL};
+  callback dtor[MAX_CALLBACK] = {NULL, NULL, cb_get, cb_del, cb_del};
+  //callback dtor[] = {NULL, NULL, NULL, NULL, NULL};
   phash = atomic_hash_create (num_strings, TTL_ON_CREATE, dtor);
   if (!phash)
     return -1;

@@ -54,69 +54,32 @@
 #define atomic_add1(v) __sync_fetch_and_add(&(v), 1)
 #define atomic_sub1(v) __sync_fetch_and_sub(&(v), 1)
 #define add1(v) __sync_fetch_and_add(&(v), 1)
-//#define add1(v) (v++)
 #define cas(dst, old, new) __sync_bool_compare_and_swap((dst), (old), (new))
 #define ip(mp, type, i) (((type *)(mp->ba[(i) >> mp->shift]))[(i) & mp->mask])
 #define i2p(mp, type, i) (i == NNULL ? NULL : &(ip(mp, type, i)))
-//#define i2p(mp, type, i) (&(ip(mp, type, i)))
-#define unhold_bucket(hv, v) do { if ((hv).y && !(hv).x) (hv).x = (v).x; } while(0)
-//#define unhold_bucket(hv, v) while ((hv).y && !cas (&(hv).x, 0, (v).x))
+//#define unhold_bucket(hv, v) do { if ((hv).y && !(hv).x) (hv).x = (v).x; } while(0)
+#define unhold_bucket(hv, v) while ((hv).y && !cas (&(hv).x, 0, (v).x))
 #define hold_bucket_otherwise_return_0(hv, v) do { unsigned long __l = (1<<24); \
-          while (!cas(&(hv).x, (v).x, 0)) { \
-            while (!(hv).x) { if (!(hv).y) return 0; poll(0, 0, 1); } \
-            if (--__l == 0) { add1 (h->stats.escapes); return 0; }} \
-          if ((hv).y != (v).y || !(hv).y) { unhold_bucket (hv, v); return 0; } \
+          while (!cas(&(hv).x, (v).x, 0)) { /* when CAS fails */ \
+            if ((hv).x != (v).x) return 0; /* already released or reused */\
+            while ((hv).x == 0) { /* wait for unhold */ \
+              if ((hv).y == 0) return 0; /* no unhold. just released */ \
+              usleep(1); /* slice wait. alt: __asm__("pause"); */ \
+              if (--__l == 0) { add1 (h->stats.escapes); return 0; } /* give up */ \
+          }} \
+          if ((hv).y != (v).y || (hv).y == 0) { unhold_bucket (hv, v); return 0; } \
           } while (0)
-
-//            if ((__l & 0xff) == 0) { poll (0, 0, 0); } 
-//            while (!(hv).x) if ((hv).y) __asm__("pause"); else return 0;} 
-#if 0
-typedef struct { unsigned long c[8]; } hc_t;
-unsigned long final[8] = {0};
-unsigned long *counterp[MAX_THREADS] = { NULL };
-DEFINE_SPINLOCK(final_mutex);
-
-/* Per thread:
-__thread hc_t *mypc = NULL;
- if (posix_memalign((void **)&mypc, 64, 64)))
-  return 1;
+/*
+#define hold_bucket_otherwise_return_0(hv, v) do { unsigned long __l = (1<<24); \
+          if ((v).x == 0 || (v).y == 0) return 0; \
+          while ((hv).x == (v).x) { \
+             if (--__l == 0) { add1 (h->stats.escapes); return 0; } \
+             if (!cas(&(hv).x, (v).x, 0)) continue; \
+             if ((hv).y == 0) return 0; \
+             if ((hv).y != (v).y || !(hv).y) { unhold_bucket (hv, v); return 0; } \
+          } \
+          } while (0)
 */
-
-void inc_count (unsigned long *p)
-{
-   *p++;
-}
-void read_count(unsigned long sum[])
-{
-  int i, t;
-  unsigned long *p;
-  spin_lock (&final_mutex);
-  for (i = 0; i < 8; i++)
-    sum[i] = final[i];
-  for (t = 0; t < MAX_THREADS; t++)
-    if ((p = counterp[t]) != NULL)
-      for (i = 0; i < 8; i++)
-         sum[i] += p[i];
-  spin_unlock(&final_mutex);
-}
-void counter_register_thread(void *p)
-{
-  int idx = gettid () % MAX_THREADS;
-  assert (counterp[idx] == NULL);
-  spin_lock(&final_mutex);
-  counterp[idx] = p;
-  spin_unlock(&final_mutex);
-}
-void counter_unregister_thread(void *p)
-{
-  spin_lock(&final_mutex);
-  pick_to_finalcounters (p, finalcount);
-  counterp[gettid() % MAX_THREADS] = NULL;
-  spin_unlock(&final_mutex);
-}
-#endif
-
-
 
 inline unsigned long
 nowms ()
@@ -134,21 +97,22 @@ create_mem_pool (size_t max_nodes, size_t node_size, size_t max_blocks)
 
   if (max_nodes < 1)
     return NULL;
-  if (posix_memalign((void **)(&pmp), 64, sizeof(*pmp)))
+  if (posix_memalign ((void **) (&pmp), 64, sizeof (*pmp)))
     return NULL;
-  memset (pmp, 0, sizeof(*pmp));
+  memset (pmp, 0, sizeof (*pmp));
 
   pmp->curr_blocks = 0;
   pmp->node_size = node_size;
   m = max_blocks < 1 ? 1024 : max_blocks;
-  pmp->max_blocks = m + 1; /* mutiple m to make overfill possible */
+  pmp->max_blocks = m + 1;	/* mutiple m to make overfill possible */
   for (pmp->shift = 0, n = 1; max_nodes > m * n; n *= 2)
     pmp->shift++;
   pmp->blk_node_num = n;
   pmp->mask = n - 1;
-  if (!posix_memalign((void **)(&pmp->ba), 64, pmp->max_blocks * sizeof(*pmp->ba)))
+  if (!posix_memalign
+      ((void **) (&pmp->ba), 64, pmp->max_blocks * sizeof (*pmp->ba)))
     {
-      memset (pmp->ba, 0, pmp->max_blocks * sizeof(*pmp->ba));
+      memset (pmp->ba, 0, pmp->max_blocks * sizeof (*pmp->ba));
       return pmp;
     }
   free (pmp);
@@ -156,7 +120,7 @@ create_mem_pool (size_t max_nodes, size_t node_size, size_t max_blocks)
 }
 
 int
-destroy_mem_pool (mem_pool_t *pmp)
+destroy_mem_pool (mem_pool_t * pmp)
 {
   unsigned int i;
   if (!pmp)
@@ -175,7 +139,7 @@ destroy_mem_pool (mem_pool_t *pmp)
 }
 
 inline nid *
-new_mem_block (mem_pool_t *pmp, volatile cas_t * recv_queue)
+new_mem_block (mem_pool_t * pmp, volatile cas_t * recv_queue)
 {
   nid i, m, sft, sz, head = 0;
   memword cas_t n, x, *pn;
@@ -184,7 +148,8 @@ new_mem_block (mem_pool_t *pmp, volatile cas_t * recv_queue)
   if (!pmp || !(p = calloc (pmp->blk_node_num, pmp->node_size)))
     return NULL;
   for (i = pmp->curr_blocks; i < pmp->max_blocks; i++)
-    if (cas (&pmp->ba[i], NULL, p)) break;
+    if (cas (&pmp->ba[i], NULL, p))
+      break;
   if (i == pmp->max_blocks)
     {
       free (p);
@@ -212,7 +177,7 @@ new_mem_block (mem_pool_t *pmp, volatile cas_t * recv_queue)
 }
 
 int
-init_htab (htab_t *ht, unsigned int num, double ratio)
+init_htab (htab_t * ht, unsigned int num, double ratio)
 {
   unsigned long i, nb;
   double r;
@@ -235,10 +200,10 @@ init_htab (htab_t *ht, unsigned int num, double ratio)
 hash_t *
 atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtors[])
 {
-  const double collision = COLLISION; /* collision control, larger is better */
+  const double collision = COLLISION;	/* collision control, larger is better */
   const size_t max_blocks = MAXBLOCKS;
   hash_t *h;
-  htab_t *ht1, *ht2, *at1; /* bucket array 1, 2 and collision array */
+  htab_t *ht1, *ht2, *at1;	/* bucket array 1, 2 and collision array */
   double K, r1, r2;
   unsigned long j, n1, n2;
   if (max_nodes < 2 || max_nodes > MAXTAB)
@@ -246,9 +211,9 @@ atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtors[])
       printf ("max_nodes range: 2 ~ %ld\n", (unsigned long) MAXTAB);
       return NULL;
     }
-  if (posix_memalign((void **)(&h), 64, sizeof(*h)))
+  if (posix_memalign ((void **) (&h), 64, sizeof (*h)))
     return NULL;
-  memset (h, 0, sizeof(*h));
+  memset (h, 0, sizeof (*h));
 
 
 #if defined (MPQ3HASH)
@@ -270,13 +235,13 @@ atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtors[])
 #endif
   if (dtors)
     for (j = 0; j < MAX_CALLBACK; j++)
-       h->dtor[j] = dtors[j];
+      h->dtor[j] = dtors[j];
   h->reset_expire = lookup_reset_ttl;
   h->nmht = NMHT;
   h->ncmp = NCMP;
-  h->nkey = NKEY;                 /* uint32_t # of hash function's output */
-  h->npos = h->nkey * NCLUSTER;   /* pos # in one hash table */
-  h->nseat = h->npos * h->nmht;   /* pos # in all hash tables */
+  h->nkey = NKEY;		/* uint32_t # of hash function's output */
+  h->npos = h->nkey * NCLUSTER;	/* pos # in one hash table */
+  h->nseat = h->npos * h->nmht;	/* pos # in all hash tables */
   h->freelist.mi = NNULL;
 
   ht1 = &h->ht[0];
@@ -289,13 +254,13 @@ atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtors[])
   printf ("init bucket array 1:\n");
   K = h->npos + 1;
   n1 = max_nodes;
-  r1 = pow ((n1 * collision / (K*K)), (1.0 / (K*K-1)));
+  r1 = pow ((n1 * collision / (K * K)), (1.0 / (K * K - 1)));
   if (init_htab (ht1, n1, r1) < 0)
     goto calloc_exit;
 
   printf ("init bucket array 2:\n");
-  n2 = (n1 + 2.0) / (K * pow (r1, K-1));
-  r2 = pow (((n2 + 2.0) * collision / K), 1.0/(K-1));
+  n2 = (n1 + 2.0) / (K * pow (r1, K - 1));
+  r2 = pow (((n2 + 2.0) * collision / K), 1.0 / (K - 1));
   if (init_htab (ht2, n2, r2) < 0)
     goto calloc_exit;
 
@@ -304,11 +269,13 @@ atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtors[])
     goto calloc_exit;
 
 //  h->mp = create_mem_pool (max_nodes, sizeof (node_t), max_blocks);
-  h->mp = create_mem_pool (ht1->nb + ht2->nb + at1->nb, sizeof (node_t), max_blocks);
+  h->mp =
+    create_mem_pool (ht1->nb + ht2->nb + at1->nb, sizeof (node_t),
+		     max_blocks);
 //  h->mp = create_mem_pool (n1 + n2, sizeof (node_t), max_blocks);
   if (!h->mp)
     goto calloc_exit;
-  
+
   h->stats.max_nodes = h->mp->max_blocks * h->mp->blk_node_num;
   h->stats.mem_htabs = ((ht1->nb + ht2->nb) * sizeof (nid)) >> 10;
   h->stats.mem_nodes = (h->stats.max_nodes * h->mp->node_size) >> 10;
@@ -324,7 +291,7 @@ calloc_exit:
 }
 
 int
-atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
+atomic_hash_stats (hash_t * h, unsigned int escaped_milliseconds)
 {
   const hstats_t *t = &h->stats;
   const htab_t *ht1 = &h->ht[0], *ht2 = &h->ht[1];
@@ -336,20 +303,23 @@ atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
   mem = (m->curr_blocks * m->blk_node_num * m->node_size) / d;
   printf ("\n");
   printf ("mem_blocks:\t%u/%u, %ux%u bytes per block\n",
-          m->curr_blocks, m->max_blocks, m->blk_node_num, m->node_size);
+	  m->curr_blocks, m->max_blocks, m->blk_node_num, m->node_size);
   printf ("mem_actual:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
 	  t->mem_htabs / d, mem / d, (t->mem_htabs + mem) / d);
   printf ("mem_limits:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
 	  t->mem_htabs / d, t->mem_nodes / d,
 	  (t->mem_htabs + t->mem_nodes) / d);
   printf ("n1[%ld]/n2[%ld]=[%.3f],  nb1[%ld]/nb2[%ld]=[%.2f]\n",
-           ht1->n, ht2->n, ht1->n*1.0/ht2->n, ht1->nb, ht2->nb,
-           ht1->nb*1.0/ht2->nb);
-  printf ("r1[%f],  r2[%f],  performance_wall[%.1f%%]\n", ht1->nb*1.0/ht1->n,
-           ht2->nb*1.0/ht2->n, ht1->n*100.0/(ht1->nb + ht2->nb));
+	  ht1->n, ht2->n, ht1->n * 1.0 / ht2->n, ht1->nb, ht2->nb,
+	  ht1->nb * 1.0 / ht2->nb);
+  printf ("r1[%f],  r2[%f],  performance_wall[%.1f%%]\n",
+	  ht1->nb * 1.0 / ht1->n, ht2->nb * 1.0 / ht2->n,
+	  ht1->n * 100.0 / (ht1->nb + ht2->nb));
   nop = ncur = nadd = ndup = nget = ndel = 0;
-  printf ("---------------------------------------------------------------------------\n");
-  printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", b, b, b, b, b, b, b, b);
+  printf
+    ("---------------------------------------------------------------------------\n");
+  printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", b, b, b, b,
+	  b, b, b, b);
   for (j = 0; j <= NMHT && (p = &h->ht[j]); j++)
     {
       ncur += p->ncur;
@@ -362,22 +332,28 @@ atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
     }
   op = ncur + nadd + ndup + nget + ndel + t->get_nohit + t->del_nohit
     + t->add_nosit + t->add_nomem + t->escapes;
-  printf ("sum %-14ld%-14ld%-14ld%-14ld%-14ld\n", ncur, nadd, ndup, nget, ndel);
-  printf ("---------------------------------------------------------------------------\n");
-  printf ("del_nohit %sget_nohit %sadd_nosit %sadd_nomem %sexpires %sescapes\n", b, b, b, b, b);
-  printf ("%-14ld%-14ld%-14ld%-14ld%-12ld%-12ld\n", t->del_nohit, t->get_nohit,
-	  t->add_nosit, t->add_nomem, t->expires, t->escapes);
-  printf ("---------------------------------------------------------------------------\n");
+  printf ("sum %-14ld%-14ld%-14ld%-14ld%-14ld\n", ncur, nadd, ndup, nget,
+	  ndel);
+  printf
+    ("---------------------------------------------------------------------------\n");
+  printf
+    ("del_nohit %sget_nohit %sadd_nosit %sadd_nomem %sexpires %sescapes\n", b,
+     b, b, b, b);
+  printf ("%-14ld%-14ld%-14ld%-14ld%-12ld%-12ld\n", t->del_nohit,
+	  t->get_nohit, t->add_nosit, t->add_nomem, t->expires, t->escapes);
+  printf
+    ("---------------------------------------------------------------------------\n");
   if (escaped_milliseconds > 0)
-    printf ("escaped_time=%.3fs, op=%ld, ops=%.2fM/s\n", escaped_milliseconds * 1.0 / 1000,
-	    op, (double) op / 1000.0 / escaped_milliseconds);
+    printf ("escaped_time=%.3fs, op=%ld, ops=%.2fM/s\n",
+	    escaped_milliseconds * 1.0 / 1000, op,
+	    (double) op / 1000.0 / escaped_milliseconds);
   printf ("\n");
   fflush (stdout);
   return 0;
 }
 
 int
-atomic_hash_destroy (hash_t *h)
+atomic_hash_destroy (hash_t * h)
 {
   unsigned int j;
   if (!h)
@@ -390,7 +366,7 @@ atomic_hash_destroy (hash_t *h)
 }
 
 inline nid
-new_node (hash_t *h)
+new_node (hash_t * h)
 {
   memword cas_t n, m;
   while (h->freelist.mi != NNULL || new_mem_block (h->mp, &h->freelist))
@@ -408,7 +384,7 @@ new_node (hash_t *h)
 }
 
 inline void
-free_node (hash_t *h, nid mi)
+free_node (hash_t * h, nid mi)
 {
   memword cas_t n, m;
   cas_t *p = (cas_t *) (i2p (h->mp, node_t, mi));
@@ -423,22 +399,23 @@ free_node (hash_t *h, nid mi)
   while (!cas (&h->freelist.all, n.all, m.all));
 }
 
-inline void 
-set_hash_node (node_t *p, hv v, void *data, unsigned long expire)
+inline void
+set_hash_node (node_t * p, hv v, void *data, unsigned long expire)
 {
   p->v = v;
   p->expire = expire;
   p->data = data;
 }
 
-inline int likely_equal (hv w, hv v)
+inline int
+stop (hv w, hv v)
 {
   return w.y == v.y;
 }
 
 /* only called in atomic_hash_get */
 inline int
-try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, void *arg)
+try_get (hash_t * h, hv v, node_t * p, nid * seat, nid mi, int idx, void *arg)
 {
   hold_bucket_otherwise_return_0 (p->v, v);
   if (*seat != mi)
@@ -446,10 +423,10 @@ try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, void *arg)
       unhold_bucket (p->v, v);
       return 0;
     }
-  if (h->dtor[DTOR_TRY_GET] && !h->dtor[DTOR_TRY_GET](p->data, arg))
+  if (h->dtor[DTOR_TRY_GET] && !h->dtor[DTOR_TRY_GET] (p->data, arg))
     {
       if (cas (seat, mi, NNULL))
-        atomic_sub1 (h->ht[idx].ncur);
+	atomic_sub1 (h->ht[idx].ncur);
       memset (p, 0, sizeof (*p));
       add1 (h->ht[idx].nget);
       free_node (h, mi);
@@ -464,7 +441,7 @@ try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, void *arg)
 
 /* only called in atomic_hash_add */
 inline int
-try_hit (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, void *arg)
+try_hit (hash_t * h, hv v, node_t * p, nid * seat, nid mi, int idx, void *arg)
 {
   hold_bucket_otherwise_return_0 (p->v, v);
   if (*seat != mi)
@@ -472,10 +449,10 @@ try_hit (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, void *arg)
       unhold_bucket (p->v, v);
       return 0;
     }
-  if (h->dtor[DTOR_TRY_HIT] && !h->dtor[DTOR_TRY_HIT](p->data, arg))
+  if (h->dtor[DTOR_TRY_HIT] && !h->dtor[DTOR_TRY_HIT] (p->data, arg))
     {
       if (cas (seat, mi, NNULL))
-        atomic_sub1 (h->ht[idx].ncur);
+	atomic_sub1 (h->ht[idx].ncur);
       memset (p, 0, sizeof (*p));
       add1 (h->ht[idx].ndup);
       free_node (h, mi);
@@ -490,7 +467,7 @@ try_hit (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, void *arg)
 
 /* only called in atomic_hash_add */
 inline int
-try_add (hash_t *h, node_t *p, nid *seat, nid mi, int idx, void *arg)
+try_add (hash_t * h, node_t * p, nid * seat, nid mi, int idx, void *arg)
 {
   hvu x = p->v.x;
   p->v.x = 0;
@@ -500,13 +477,13 @@ try_add (hash_t *h, node_t *p, nid *seat, nid mi, int idx, void *arg)
       return 0; /* other thread wins, caller to retry other seats */
     }
   atomic_add1 (h->ht[idx].ncur);
-  if (h->dtor[DTOR_TRY_ADD] && !h->dtor[DTOR_TRY_ADD](p->data, arg))
+  if (h->dtor[DTOR_TRY_ADD] && !h->dtor[DTOR_TRY_ADD] (p->data, arg))
     {
       if (cas (seat, mi, NNULL))
-        atomic_sub1 (h->ht[idx].ncur);
+	atomic_sub1 (h->ht[idx].ncur);
       memset (p, 0, sizeof (*p));
       free_node (h, mi);
-      return 1; /* stop adding this node */
+      return 1;	/* stop adding this node */
     }
   p->v.x = x;
   add1 (h->ht[idx].nadd);
@@ -515,7 +492,7 @@ try_add (hash_t *h, node_t *p, nid *seat, nid mi, int idx, void *arg)
 
 /* only called in atomic_hash_del */
 inline int
-try_del (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, void *arg)
+try_del (hash_t * h, hv v, node_t * p, nid * seat, nid mi, int idx, void *arg)
 {
   hold_bucket_otherwise_return_0 (p->v, v);
   if (*seat != mi || !cas (seat, mi, NNULL))
@@ -524,39 +501,53 @@ try_del (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, void *arg)
       return 0;
     }
   atomic_sub1 (h->ht[idx].ncur);
-  if (h->dtor[DTOR_TRY_DEL])
-    h->dtor[DTOR_TRY_DEL](p->data, arg);
+  void *user_data = p->data;
   memset (p, 0, sizeof (*p));
   add1 (h->ht[idx].ndel);
   free_node (h, mi);
+  if (h->dtor[DTOR_TRY_DEL])
+    h->dtor[DTOR_TRY_DEL] (user_data, arg);
   return 1;
 }
 
 inline int
-valid_ttl (hash_t *h, unsigned long now, node_t *p, nid *seat, nid mi, int idx, void *arg, nid *ret)
+valid_ttl (hash_t * h, unsigned long now, node_t * p, nid * seat, nid mi,
+	   int idx, void *arg, nid * ret)
 {
   unsigned long expire = p->expire;
+ /* valid state, quickly skip to call try_action. */
   if (expire == 0 || expire > now)
-     return 1; /* rapid return for most of cases*/
-  add1 (h->stats.expires);
+    return 1;
   hv v = p->v;
+  /* hold on or removed by others, skip to call try_action */
+  if (v.x == 0 || v.y == 0)
+    return 1;
   hold_bucket_otherwise_return_0 (p->v, v);
+  /* re-enter valid state, skip to call try_action */
   if (p->expire == 0 || p->expire > now)
     {
       unhold_bucket (p->v, v);
-      return 1; /* caller to go ahead if ttl check meets exception */
+      return 1;
     }
+  /* expired,  now remove it */
   if (*seat != mi || !cas (seat, mi, NNULL))
     {
+     /* failed to remove. let others do it in the future, skip and go next pos */
       unhold_bucket (p->v, v);
-      return 0; /* caller to try next bucket */
+      return 0;
     }
   atomic_sub1 (h->ht[idx].ncur);
-  if (h->dtor[DTOR_EXPIRED])
-    h->dtor[DTOR_EXPIRED](p->data, arg);
+  void *user_data = p->data;
   memset (p, 0, sizeof (*p));
-  if (!ret || !cas(ret, NNULL, mi))
+  add1 (h->stats.expires);
+  /* return this hash node for caller re-use */
+  /* strict version: if (!ret || !cas(ret, NNULL, mi)) */
+  if (ret && *ret == NNULL)
+    *ret = mi;
+  else
     free_node (h, mi);
+  if (h->dtor[DTOR_EXPIRED])
+    h->dtor[DTOR_EXPIRED] (user_data, arg);
   return 0;
 }
 
@@ -600,95 +591,112 @@ valid_ttl (hash_t *h, unsigned long now, node_t *p, nid *seat, nid mi, int idx, 
 
 #define idx(j) (j<(NCLUSTER*NKEY)?0:1)
 int
-atomic_hash_add (hash_t *h, void *kwd, size_t len, void *data, int initial_ttl, void *arg)
+atomic_hash_add (hash_t * h, void *kwd, size_t len, void *data,
+		 int initial_ttl, void *arg)
 {
   register unsigned int i, j;
   register nid mi;
   register node_t *p;
   memword nid *a[NSEAT];
-  memword union { hv v; nid d[NKEY]; } t;
+  memword union
+  {
+    hv v;
+    nid d[NKEY];
+  } t;
   nid ni = NNULL;
   unsigned long now = nowms ();
-  
+
   h->hash_func (kwd, len, &t);
-  collect_hash_pos(t.d, a);
+  collect_hash_pos (t.d, a);
   for (j = 0; j < NSEAT; j++)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-      if (valid_ttl (h, now, p, a[j], mi, idx(j), arg, &ni))
-        if (likely_equal (p->v, t.v) && try_hit (h, t.v, p, a[j], mi, idx(j), arg))
-          return 0;
+      if (valid_ttl (h, now, p, a[j], mi, idx (j), arg, &ni))
+	if (stop (p->v, t.v) && try_hit (h, t.v, p, a[j], mi, idx (j), arg))
+	  goto hash_value_exists;
   for (i = h->ht[NMHT].ncur, j = 0; i > 0 && j < MINTAB; j++)
     if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && i--)
       if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, &ni))
-        if (likely_equal (p->v, t.v) && try_hit (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
-	      return 0;
+	if (stop (p->v, t.v) && try_hit (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
+	  goto hash_value_exists;
   if (ni == NNULL && (ni = new_node (h)) == NNULL)
-    return -2;
+    return -2;	/* hash node exhausted */
   p = i2p (h->mp, node_t, ni);
-  set_hash_node (p, t.v, data, (initial_ttl>0 ? initial_ttl+now : 0));
+  set_hash_node (p, t.v, data, (initial_ttl > 0 ? initial_ttl + now : 0));
   for (j = 0; j < NSEAT; j++)
-    if (*a[j] == NNULL && try_add (h, p, a[j], ni, idx(j), arg))
-      return 0;
+    if (*a[j] == NNULL && try_add (h, p, a[j], ni, idx (j), arg))
+      return 0;	/* hash value added */
   if (h->ht[NMHT].ncur < MINTAB)
     for (j = 0; j < MINTAB; j++)
       if (h->ht[NMHT].b[j] == NNULL && try_add (h, p, &h->ht[NMHT].b[j], ni, NMHT, arg))
-	    return 0;
+	return 0; /* hash value added */
   memset (p, 0, sizeof (*p));
   free_node (h, ni);
   add1 (h->stats.add_nosit);
-  return -1;
+  return -1; /* add but fail */
+hash_value_exists:
+  if (ni != NNULL)
+    free_node (h, ni);
+  return 1; /* hash value exists */
 }
 
 int
-atomic_hash_get (hash_t *h, void *kwd, size_t len, void *arg)
+atomic_hash_get (hash_t * h, void *kwd, size_t len, void *arg)
 {
   register unsigned int i, j;
   register nid mi;
   register node_t *p;
   memword nid *a[NSEAT];
-  memword union { hv v; nid d[NKEY]; } t;
+  memword union
+  {
+    hv v;
+    nid d[NKEY];
+  } t;
   unsigned long now = nowms ();
 
   h->hash_func (kwd, len, &t);
-  collect_hash_pos(t.d, a);
+  collect_hash_pos (t.d, a);
   for (j = 0; j < NSEAT; j++)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-      if (valid_ttl (h, now, p, a[j], mi, idx(j), arg, NULL))
-        if (likely_equal (p->v, t.v) && try_get (h, t.v, p, a[j], mi, idx(j), arg))
-	      return 0;
+      if (valid_ttl (h, now, p, a[j], mi, idx (j), arg, NULL))
+	if (stop (p->v, t.v) && try_get (h, t.v, p, a[j], mi, idx (j), arg))
+	  return 0;
   for (j = i = 0; i < h->ht[NMHT].ncur && j < MINTAB; j++)
     if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && ++i)
       if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, NULL))
-        if (likely_equal (p->v, t.v) && try_get (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
-	      return 0;
+	if (stop (p->v, t.v) && try_get (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
+	  return 0;
   add1 (h->stats.get_nohit);
   return -1;
 }
 
 int
-atomic_hash_del (hash_t *h, void *kwd, size_t len, void *arg)
+atomic_hash_del (hash_t * h, void *kwd, size_t len, void *arg)
 {
   register unsigned int i, j;
   register nid mi;
   register node_t *p;
   memword nid *a[NSEAT];
-  memword union { hv v; nid d[NKEY]; } t;
+  memword union
+  {
+    hv v;
+    nid d[NKEY];
+  } t;
   unsigned long now = nowms ();
 
   h->hash_func (kwd, len, &t);
-  collect_hash_pos(t.d, a);
+  collect_hash_pos (t.d, a);
   i = 0; /* delete all matches */
   for (j = 0; j < NSEAT; j++)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-      if (valid_ttl (h, now, p, a[j], mi, idx(j), arg, NULL))
-	    if (likely_equal (p->v, t.v) && try_del (h, t.v, p, a[j], mi, idx(j), arg))
-	      i++;
+      if (valid_ttl (h, now, p, a[j], mi, idx (j), arg, NULL))
+	if (stop (p->v, t.v) && try_del (h, t.v, p, a[j], mi, idx (j), arg))
+	  i++;
   if (h->ht[NMHT].ncur > 0)
     for (j = 0; j < MINTAB; j++)
       if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-        if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, NULL))
-	      if (likely_equal (p->v, t.v) && try_del (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
-	        i++;
+	if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, NULL))
+	  if (stop (p->v, t.v) && try_del (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
+	    i++;
   if (i > 0)
     return 0;
   add1 (h->stats.del_nohit);
