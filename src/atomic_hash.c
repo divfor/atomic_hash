@@ -373,11 +373,11 @@ new_node (hash_t * h)
     {
       n.all = h->freelist.all;
       if (n.mi == NNULL)
-	continue;
+	    continue;
       m.mi = ((cas_t *) (i2p (h->mp, node_t, n.mi)))->mi;
       m.rfn = n.rfn + 1;
       if (cas (&h->freelist.all, n.all, m.all))
-	return n.mi;
+        return n.mi;
     }
   add1 (h->stats.add_nomem);
   return NNULL;
@@ -426,7 +426,7 @@ try_get (hash_t * h, hv v, node_t * p, nid * seat, nid mi, int idx, void *arg)
   if (h->dtor[DTOR_TRY_GET] && !h->dtor[DTOR_TRY_GET] (p->data, arg))
     {
       if (cas (seat, mi, NNULL))
-	atomic_sub1 (h->ht[idx].ncur);
+        atomic_sub1 (h->ht[idx].ncur);
       memset (p, 0, sizeof (*p));
       add1 (h->ht[idx].nget);
       free_node (h, mi);
@@ -452,7 +452,7 @@ try_hit (hash_t * h, hv v, node_t * p, nid * seat, nid mi, int idx, void *arg)
   if (h->dtor[DTOR_TRY_HIT] && !h->dtor[DTOR_TRY_HIT] (p->data, arg))
     {
       if (cas (seat, mi, NNULL))
-	atomic_sub1 (h->ht[idx].ncur);
+        atomic_sub1 (h->ht[idx].ncur);
       memset (p, 0, sizeof (*p));
       add1 (h->ht[idx].ndup);
       free_node (h, mi);
@@ -480,7 +480,7 @@ try_add (hash_t * h, node_t * p, nid * seat, nid mi, int idx, void *arg)
   if (h->dtor[DTOR_TRY_ADD] && !h->dtor[DTOR_TRY_ADD] (p->data, arg))
     {
       if (cas (seat, mi, NNULL))
-	atomic_sub1 (h->ht[idx].ncur);
+        atomic_sub1 (h->ht[idx].ncur);
       memset (p, 0, sizeof (*p));
       free_node (h, mi);
       return 1;	/* stop adding this node */
@@ -598,11 +598,7 @@ atomic_hash_add (hash_t * h, void *kwd, size_t len, void *data,
   register nid mi;
   register node_t *p;
   memword nid *a[NSEAT];
-  memword union
-  {
-    hv v;
-    nid d[NKEY];
-  } t;
+  memword union { hv v; nid d[NKEY]; } t;
   nid ni = NNULL;
   unsigned long now = nowms ();
 
@@ -611,13 +607,13 @@ atomic_hash_add (hash_t * h, void *kwd, size_t len, void *data,
   for (j = 0; j < NSEAT; j++)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
       if (valid_ttl (h, now, p, a[j], mi, idx (j), arg, &ni))
-	if (stop (p->v, t.v) && try_hit (h, t.v, p, a[j], mi, idx (j), arg))
-	  goto hash_value_exists;
+        if (stop (p->v, t.v) && try_hit (h, t.v, p, a[j], mi, idx (j), arg))
+	      goto hash_value_exists;
   for (i = h->ht[NMHT].ncur, j = 0; i > 0 && j < MINTAB; j++)
     if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && i--)
       if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, &ni))
-	if (stop (p->v, t.v) && try_hit (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
-	  goto hash_value_exists;
+        if (stop (p->v, t.v) && try_hit (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
+          goto hash_value_exists;
   if (ni == NNULL && (ni = new_node (h)) == NNULL)
     return -2;	/* hash node exhausted */
   p = i2p (h->mp, node_t, ni);
@@ -628,11 +624,12 @@ atomic_hash_add (hash_t * h, void *kwd, size_t len, void *data,
   if (h->ht[NMHT].ncur < MINTAB)
     for (j = 0; j < MINTAB; j++)
       if (h->ht[NMHT].b[j] == NNULL && try_add (h, p, &h->ht[NMHT].b[j], ni, NMHT, arg))
-	return 0; /* hash value added */
+        return 0; /* hash value added */
   memset (p, 0, sizeof (*p));
   free_node (h, ni);
   add1 (h->stats.add_nosit);
   return -1; /* add but fail */
+  
 hash_value_exists:
   if (ni != NNULL)
     free_node (h, ni);
@@ -646,11 +643,7 @@ atomic_hash_get (hash_t * h, void *kwd, size_t len, void *arg)
   register nid mi;
   register node_t *p;
   memword nid *a[NSEAT];
-  memword union
-  {
-    hv v;
-    nid d[NKEY];
-  } t;
+  memword union { hv v; nid d[NKEY]; } t;
   unsigned long now = nowms ();
 
   h->hash_func (kwd, len, &t);
@@ -676,11 +669,7 @@ atomic_hash_del (hash_t * h, void *kwd, size_t len, void *arg)
   register nid mi;
   register node_t *p;
   memword nid *a[NSEAT];
-  memword union
-  {
-    hv v;
-    nid d[NKEY];
-  } t;
+  memword union { hv v; nid d[NKEY]; } t;
   unsigned long now = nowms ();
 
   h->hash_func (kwd, len, &t);
@@ -689,14 +678,14 @@ atomic_hash_del (hash_t * h, void *kwd, size_t len, void *arg)
   for (j = 0; j < NSEAT; j++)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
       if (valid_ttl (h, now, p, a[j], mi, idx (j), arg, NULL))
-	if (stop (p->v, t.v) && try_del (h, t.v, p, a[j], mi, idx (j), arg))
-	  i++;
+        if (stop (p->v, t.v) && try_del (h, t.v, p, a[j], mi, idx (j), arg))
+          i++;
   if (h->ht[NMHT].ncur > 0)
     for (j = 0; j < MINTAB; j++)
       if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-	if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, NULL))
-	  if (stop (p->v, t.v) && try_del (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
-	    i++;
+	    if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, arg, NULL))
+          if (stop (p->v, t.v) && try_del (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, arg))
+            i++;
   if (i > 0)
     return 0;
   add1 (h->stats.del_nohit);
