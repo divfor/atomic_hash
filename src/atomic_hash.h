@@ -77,10 +77,10 @@ typedef struct hash_counters
 
 typedef struct mem_pool
 {
-  volatile nid curr_blocks;
   void **ba;
   shared nid mask, shift;	/* used for i2p() only */
-  shared nid max_blocks, blk_node_num, node_size;
+  shared nid max_blocks, blk_node_num, node_size, blk_size;
+  volatile nid curr_blocks;
 } mem_pool_t;
 
 typedef union {
@@ -105,7 +105,7 @@ typedef struct htab
 typedef struct hash
 {
 /* hash function, here select cityhash_128 as default */
-  shared void (* hash_func) (const void *key, const size_t len, void *r);
+  shared void (* hash_func) (const void *key, size_t len, void *r);
 
 /* destructor function, must non-block return as soon as possible !!! 
  * increase NHP if you cannot get them faster
@@ -150,10 +150,10 @@ if a item's hash_node->expire == 0, atomic_hash will never call DTOR_EXPIRED cal
 */
 
 /* return (int): 0 for successful operation and non-zero for unsuccessful operation */
-hash_t * atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtor[MAX_CALLBACK]);
+hash_t * atomic_hash_create (unsigned int max_nodes, int lookup_reset_ttl, callback dtor[MAX_CALLBACK]);
 int atomic_hash_destroy (hash_t *h);
-int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *dtor_arg); //add non-duplicate
-int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *dtor_arg); //delete all matches
-int atomic_hash_get (hash_t *h, void *key, size_t key_len, void *dtor_arg); //get the first match
-int atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds);
+int atomic_hash_add (hash_t *h, void *key, int key_len, void *data, int initial_ttl, void *dtor_arg);
+int atomic_hash_del (hash_t *h, void *key, int key_len, void *dtor_arg); //delete all matches
+int atomic_hash_get (hash_t *h, void *key, int key_len, void *dtor_arg); //get the first match
+int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
 #endif

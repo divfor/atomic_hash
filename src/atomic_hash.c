@@ -47,7 +47,7 @@
 #define NNULL 0xFFFFFFFF
 #define MAXTAB NNULL
 #define MINTAB 64
-#define COLLISION 100 //0.01 ~> avg 25 in seat
+#define COLLISION 1 //0.01 ~> avg 25 in seat
 #define MAXBLOCKS 1024
 
 #define memword __attribute__((aligned(sizeof(void *))))
@@ -90,27 +90,27 @@ nowms ()
 }
 
 mem_pool_t *
-create_mem_pool (size_t max_nodes, size_t node_size, size_t max_blocks)
+create_mem_pool (unsigned int max_nodes, unsigned int node_size, unsigned int max_blocks)
 {
-  unsigned long n, m;
+  unsigned int n, m;
   mem_pool_t *pmp;
 
-  if (max_nodes < 1)
+  if (max_nodes < 1 || max_nodes > MAXTAB)
     return NULL;
   if (posix_memalign ((void **) (&pmp), 64, sizeof (*pmp)))
     return NULL;
   memset (pmp, 0, sizeof (*pmp));
 
   pmp->curr_blocks = 0;
-  pmp->node_size = node_size;
-  m = max_blocks < 1 ? 1024 : max_blocks;
-  pmp->max_blocks = m + 1;	/* mutiple m to make overfill possible */
+  pmp->node_size = (nid)node_size;
+  m = max_blocks == 0 ? 1024 : max_blocks;
+  pmp->max_blocks = (nid)(m + 1);	/* mutiple m to make overfill possible */
   for (pmp->shift = 0, n = 1; max_nodes > m * n; n *= 2)
     pmp->shift++;
-  pmp->blk_node_num = n;
-  pmp->mask = n - 1;
-  if (!posix_memalign
-      ((void **) (&pmp->ba), 64, pmp->max_blocks * sizeof (*pmp->ba)))
+  pmp->blk_node_num = (nid)n;
+  pmp->mask = (nid)(n - 1);
+  pmp->blk_size = (nid)(pmp->blk_node_num * pmp->node_size);
+  if (!posix_memalign ((void **) (&pmp->ba), 64, pmp->max_blocks * sizeof (*pmp->ba)))
     {
       memset (pmp->ba, 0, pmp->max_blocks * sizeof (*pmp->ba));
       return pmp;
@@ -122,7 +122,7 @@ create_mem_pool (size_t max_nodes, size_t node_size, size_t max_blocks)
 int
 destroy_mem_pool (mem_pool_t * pmp)
 {
-  unsigned int i;
+  unsigned long i;
   if (!pmp)
     return -1;
   for (i = 0; i < pmp->max_blocks; i++)
@@ -149,13 +149,15 @@ new_mem_block (mem_pool_t * pmp, volatile cas_t * recv_queue)
     return NULL;
   for (i = pmp->curr_blocks; i < pmp->max_blocks; i++)
     if (cas (&pmp->ba[i], NULL, p))
-      break;
+      {
+        atomic_add1 (pmp->curr_blocks);
+        break;
+      }
   if (i == pmp->max_blocks)
     {
       free (p);
       return NULL;
     }
-  add1 (pmp->curr_blocks);
   sz = pmp->node_size;
   sft = pmp->shift;
   m = pmp->mask;
@@ -177,31 +179,33 @@ new_mem_block (mem_pool_t * pmp, volatile cas_t * recv_queue)
 }
 
 int
-init_htab (htab_t * ht, unsigned int num, double ratio)
+init_htab (htab_t * ht, unsigned long num, double ratio)
 {
   unsigned long i, nb;
   double r;
   nb = num * ratio;
   for (i = 134217728; nb > i; i *= 2);
-  nb = (nb >= 134217728) ? i : nb;
+  nb = (nb >= 134217728) ? i : nb; // improve folding for more than 1/32 of MAXTAB (2^32)
   ht->nb = (i > MAXTAB) ? MAXTAB : ((nb < MINTAB) ? MINTAB : nb);
-  ht->n = num;			/* for array tab: n <- 0, nb <- 256, r <- tunning */
+  ht->n = num; //if 3rd tab: n <- 0, nb <- MINTAB, r <- COLLISION
   r = (ht->n == 0 ? ratio : ht->nb * 1.0 / ht->n);
   if (!(ht->b = calloc (ht->nb, sizeof (*ht->b))))
     return -1;
   for (i = 0; i < ht->nb; i++)
     ht->b[i] = NNULL;
-  printf ("expected nb[%u] = n[%u] * r[%f]\n", (unsigned int) (num * ratio),
+#ifdef DEBUG
+  printf ("expected nb[%ld] = n[%ld] * r[%f]\n", (unsigned long) (num * ratio),
 	  num, ratio);
   printf ("actual   nb[%ld] = n[%ld] * r[%f]\n", ht->nb, ht->n, r);
+#endif
   return 0;
 }
 
 hash_t *
-atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtors[])
+atomic_hash_create (unsigned int max_nodes, int lookup_reset_ttl, callback dtors[])
 {
   const double collision = COLLISION;	/* collision control, larger is better */
-  const size_t max_blocks = MAXBLOCKS;
+  const unsigned long max_blocks = MAXBLOCKS;
   hash_t *h;
   htab_t *ht1, *ht2, *at1;	/* bucket array 1, 2 and collision array */
   double K, r1, r2;
@@ -269,9 +273,7 @@ atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtors[])
     goto calloc_exit;
 
 //  h->mp = create_mem_pool (max_nodes, sizeof (node_t), max_blocks);
-  h->mp =
-    create_mem_pool (ht1->nb + ht2->nb + at1->nb, sizeof (node_t),
-		     max_blocks);
+  h->mp = create_mem_pool (ht1->nb + ht2->nb + at1->nb, sizeof (node_t), max_blocks);
 //  h->mp = create_mem_pool (n1 + n2, sizeof (node_t), max_blocks);
   if (!h->mp)
     goto calloc_exit;
@@ -291,35 +293,37 @@ calloc_exit:
 }
 
 int
-atomic_hash_stats (hash_t * h, unsigned int escaped_milliseconds)
+atomic_hash_stats (hash_t * h, unsigned long escaped_milliseconds)
 {
   const hstats_t *t = &h->stats;
   const htab_t *ht1 = &h->ht[0], *ht2 = &h->ht[1];
   htab_t *p;
   mem_pool_t *m = h->mp;
-  unsigned long j, nadd, ndup, nget, ndel, nop, ncur, op = 0, mem = 0;
-  double d = 1024.0;
+  unsigned long j, nadd, ndup, nget, ndel, nop, ncur, op = 0;
+  double blk_in_kB, mem, d = 1024.0;
   char *b = "    ";
-  mem = (m->curr_blocks * m->blk_node_num * m->node_size) / d;
+  blk_in_kB = m->blk_size / d;
+  mem = m->curr_blocks * blk_in_kB;
+#ifdef DEBUG
+  printf ("mem=%.2f, blk_in_kB=%.2f, curr_block=%u, blk_nod_num=%u, node_size=%u\n",
+           mem, blk_in_kB, m->curr_blocks, m->blk_node_num, m->node_size);
+#endif
   printf ("\n");
-  printf ("mem_blocks:\t%u/%u, %ux%u bytes per block\n",
-	  m->curr_blocks, m->max_blocks, m->blk_node_num, m->node_size);
-  printf ("mem_actual:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
+  printf ("mem_blocks:\t%u/%u, %ux%u bytes, %.2f MB per block\n", m->curr_blocks, m->max_blocks,
+          m->blk_node_num, m->node_size, m->blk_size/1048576.0);
+  printf ("mem_to_max:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
+	  t->mem_htabs / d, t->mem_nodes / d, (t->mem_htabs + t->mem_nodes) / d);
+  printf ("mem_in_use:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
 	  t->mem_htabs / d, mem / d, (t->mem_htabs + mem) / d);
-  printf ("mem_limits:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
-	  t->mem_htabs / d, t->mem_nodes / d,
-	  (t->mem_htabs + t->mem_nodes) / d);
   printf ("n1[%ld]/n2[%ld]=[%.3f],  nb1[%ld]/nb2[%ld]=[%.2f]\n",
 	  ht1->n, ht2->n, ht1->n * 1.0 / ht2->n, ht1->nb, ht2->nb,
 	  ht1->nb * 1.0 / ht2->nb);
-  printf ("r1[%f],  r2[%f],  performance_wall[%.1f%%]\n",
+  printf ("r1[%f]/r2[%f],  performance_wall[%.1f%%]\n",
 	  ht1->nb * 1.0 / ht1->n, ht2->nb * 1.0 / ht2->n,
 	  ht1->n * 100.0 / (ht1->nb + ht2->nb));
   nop = ncur = nadd = ndup = nget = ndel = 0;
-  printf
-    ("---------------------------------------------------------------------------\n");
-  printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", b, b, b, b,
-	  b, b, b, b);
+  printf ("---------------------------------------------------------------------------\n");
+  printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", b, b, b, b, b, b, b, b);
   for (j = 0; j <= NMHT && (p = &h->ht[j]); j++)
     {
       ncur += p->ncur;
@@ -327,25 +331,17 @@ atomic_hash_stats (hash_t * h, unsigned int escaped_milliseconds)
       ndup += p->ndup;
       nget += p->nget;
       ndel += p->ndel;
-      printf ("%-4ld%-14ld%-14ld%-14ld%-14ld%-14ld\n",
-	      j, p->ncur, p->nadd, p->ndup, p->nget, p->ndel);
+      printf ("%-4ld%-14ld%-14ld%-14ld%-14ld%-14ld\n", j, p->ncur, p->nadd, p->ndup, p->nget, p->ndel);
     }
-  op = ncur + nadd + ndup + nget + ndel + t->get_nohit + t->del_nohit
-    + t->add_nosit + t->add_nomem + t->escapes;
-  printf ("sum %-14ld%-14ld%-14ld%-14ld%-14ld\n", ncur, nadd, ndup, nget,
-	  ndel);
-  printf
-    ("---------------------------------------------------------------------------\n");
-  printf
-    ("del_nohit %sget_nohit %sadd_nosit %sadd_nomem %sexpires %sescapes\n", b,
-     b, b, b, b);
+  op = ncur + nadd + ndup + nget + ndel + t->get_nohit + t->del_nohit + t->add_nosit + t->add_nomem + t->escapes;
+  printf ("sum %-14ld%-14ld%-14ld%-14ld%-14ld\n", ncur, nadd, ndup, nget, ndel);
+  printf ("---------------------------------------------------------------------------\n");
+  printf ("del_nohit %sget_nohit %sadd_nosit %sadd_nomem %sexpires %sescapes\n", b, b, b, b, b);
   printf ("%-14ld%-14ld%-14ld%-14ld%-12ld%-12ld\n", t->del_nohit,
 	  t->get_nohit, t->add_nosit, t->add_nomem, t->expires, t->escapes);
-  printf
-    ("---------------------------------------------------------------------------\n");
+  printf ("---------------------------------------------------------------------------\n");
   if (escaped_milliseconds > 0)
-    printf ("escaped_time=%.3fs, op=%ld, ops=%.2fM/s\n",
-	    escaped_milliseconds * 1.0 / 1000, op,
+    printf ("escaped_time=%.3fs, op=%ld, ops=%.2fM/s\n", escaped_milliseconds * 1.0 / 1000, op,
 	    (double) op / 1000.0 / escaped_milliseconds);
   printf ("\n");
   fflush (stdout);
@@ -591,7 +587,7 @@ valid_ttl (hash_t * h, unsigned long now, node_t * p, nid * seat, nid mi,
 
 #define idx(j) (j<(NCLUSTER*NKEY)?0:1)
 int
-atomic_hash_add (hash_t * h, void *kwd, size_t len, void *data,
+atomic_hash_add (hash_t * h, void *kwd, int len, void *data,
 		 int initial_ttl, void *arg)
 {
   register unsigned int i, j;
@@ -637,7 +633,7 @@ hash_value_exists:
 }
 
 int
-atomic_hash_get (hash_t * h, void *kwd, size_t len, void *arg)
+atomic_hash_get (hash_t * h, void *kwd, int len, void *arg)
 {
   register unsigned int i, j;
   register nid mi;
@@ -663,7 +659,7 @@ atomic_hash_get (hash_t * h, void *kwd, size_t len, void *arg)
 }
 
 int
-atomic_hash_del (hash_t * h, void *kwd, size_t len, void *arg)
+atomic_hash_del (hash_t * h, void *kwd, int len, void *arg)
 {
   register unsigned int i, j;
   register nid mi;

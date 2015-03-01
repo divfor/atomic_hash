@@ -20,8 +20,8 @@
 
 #define time_after(a,b) ((b) > (a) || (long)(b) - (long)(a) < 0)
 #define time_before(a,b)  time_after(b,a)
-#define TTL_ON_ADD 100
-#define TTL_ON_CREATE 400
+#define TTL_ON_ADD 0
+#define TTL_ON_CREATE 0
 
 typedef struct teststr {
   char *s;
