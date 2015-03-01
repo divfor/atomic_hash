@@ -1,6 +1,6 @@
 #!/bin/sh
 
-target=${1:-'hs'}
+target=${1:-'/home/hs'}
 
 ( cd ../src && make clean && make uninstall && make && make install )
 mkfile="./makefile"
