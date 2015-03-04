@@ -25,6 +25,7 @@ There are three atomic hash functions (atomic_hash_add/get/del). Generally they 
 typedef int (*hook)(void *hash_data, void *return_data)
 
 here 'hash_data' will be copied from 'hash_node->data' (generally a pointer to the user data structure), and 'return_data' will be given by caller. The hook function must be non-blocking and spends time as less as possible, otherwise performance will drop remarkablly. The hook function should take care user data's memory if it returns -1(PLEASE_REMOVE_HASH_NODE), or simply returns either -2(PLEASE_SET_TTL_TO_DEFAULT) or a positive ttl number to indicate updating this node's expiration timer. actions for other return values are not defined. hook functions can be registered with your own hook functions after hash table is created, to replace the default ones that do not free any memory:
+
   h->on_ttl = default_func_remove_node;    -- return PLEASE_REMOVE_HASH_NODE
 
   h->on_del = default_func_remove_node;    -- return PLEASE_REMOVE_HASH_NODE
