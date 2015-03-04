@@ -4,19 +4,19 @@ atomic hash is a lock-free hash table designed for multiple threads to share cac
 By giving max hash item number and expected collision rate, atomic_hash calculates two load factors and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving. Both of successful and unsuccessful search from the hash table are O(1)
 
 #Hash Functions
-hash_t * atomic_hash_create (size_t max_nodes, int lookup_reset_ttl, callback dtor[MAX_CALLBACK])
+/* return (int): 0 for successful operation and non-zero for unsuccessful operation */
+hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
 
-int atomic_hash_destroy (hash_t *h)
+int atomic_hash_destroy (hash_t *h);
 
-int atomic_hash_add (hash_t *h, void *key, size_t key_len, void *data, int initial_ttl, void *callback_arg) // add non-dup
+int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook func_on_dup, void *out);
 
-int atomic_hash_del (hash_t *h, void *key, size_t key_len, void *callback_arg) // del all matches
+int atomic_hash_del (hash_t *h, void *key, int key_len, hook func_on_del, void *out); //delete all matches
 
-int atomic_hash_get (hash_t *h, void *key, size_t key_len, void *callback_arg) // get first match
+int atomic_hash_get (hash_t *h, void *key, int key_len, hook func_on_get, void *out); //get the first match
 
-int atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
+int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
 
-return (int): 0 for successful operation and non-zero for unsuccessful operation
 
 # Usage
 There are three atomic hash functions (atomic_hash_add/get/del). Generally they find target hash node, hold on it safely for a while to call hook function to read/copy/update/release user data:
