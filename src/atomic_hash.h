@@ -25,15 +25,14 @@
 #define __ATOMIC_HASH_
 #include <stdint.h>
 
-typedef int (*callback)(void *bucket_data, void *callback_args);
+typedef int (*callback)(void *hash_data, void *caller_data);
+typedef int (* hook) (void *hash_data, void *rtn_data);
 
 /* callback function idx */
-#define DTOR_TRY_HIT 0
-#define DTOR_TRY_ADD 1
-#define DTOR_TRY_GET 2
-#define DTOR_TRY_DEL 3
-#define DTOR_EXPIRED 4
-#define MAX_CALLBACK (DTOR_EXPIRED+1)
+#define PLEASE_REMOVE_HASH_NODE    -1
+#define PLEASE_DO_NOT_CHANGE_TTL   -2
+#define PLEASE_SET_TTL_TO_DEFAULT  -3
+#define PLEASE_SET_TTL_TO(n)      (n)
 
 //#define MD5HASH
 //#define MURMUR3HASH_128
@@ -109,7 +108,8 @@ typedef struct hash
  * increase NHP if you cannot get them faster
  * return 0 to indicate removing the hash node
  * */
-  shared callback dtor[MAX_CALLBACK];
+//  callback func to deal with user data in safe zone
+  shared hook on_ttl, on_add, on_dup, on_get, on_del;
   shared volatile cas_t freelist; /* free hash node list */
   shared htab_t ht[3]; /* ht[2] for array [MINTAB] */
   shared hstats_t stats;
@@ -148,10 +148,11 @@ if a item's hash_node->expire == 0, atomic_hash will never call DTOR_EXPIRED cal
 */
 
 /* return (int): 0 for successful operation and non-zero for unsuccessful operation */
-hash_t * atomic_hash_create (unsigned int max_nodes, int lookup_reset_ttl, callback dtor[MAX_CALLBACK]);
+hash_t * atomic_hash_create (unsigned int max_nodes, int lookup_reset_ttl);
 int atomic_hash_destroy (hash_t *h);
-int atomic_hash_add (hash_t *h, void *key, int key_len, void *data, int initial_ttl, void *dtor_arg);
-int atomic_hash_del (hash_t *h, void *key, int key_len, void *dtor_arg); //delete all matches
-int atomic_hash_get (hash_t *h, void *key, int key_len, void *dtor_arg); //get the first match
+int atomic_hash_add (hash_t *h, void *key, int key_len, void *hash_data,
+                     int initial_ttl, hook cbf_dup, void *rtn);
+int atomic_hash_del (hash_t *h, void *key, int key_len, hook cbf, void *rtn); //delete all matches
+int atomic_hash_get (hash_t *h, void *key, int key_len, hook cbf, void *rtn); //get the first match
 int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
 #endif

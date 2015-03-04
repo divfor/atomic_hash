@@ -20,8 +20,8 @@
 
 #define time_after(a,b) ((b) > (a) || (long)(b) - (long)(a) < 0)
 #define time_before(a,b)  time_after(b,a)
-#define TTL_ON_ADD 0
-#define TTL_ON_CREATE 0
+#define TTL_ON_ADD 200
+#define TTL_ON_CREATE 300
 
 typedef struct teststr {
   char *s;
@@ -36,18 +36,30 @@ now ()
   return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
 }
 
+int cb_dup (void *data, void *arg)
+{
+  char * buf = strdup(data);
+  free (buf);
+  return PLEASE_SET_TTL_TO_DEFAULT;
+}
+
+int cb_add (void *data, void *arg)
+{
+  return PLEASE_DO_NOT_CHANGE_TTL;
+}
+
 int cb_get (void *data, void *arg)
 {
   char * buf = strdup(data);
   free (buf);
-  return 1;
+  return PLEASE_DO_NOT_CHANGE_TTL;
 }
 
 int cb_del (void *data, void *arg)
 {
   char * buf = strdup(data);
   free (buf);
-  return 0;
+  return PLEASE_REMOVE_HASH_NODE;
 }
 
 int cb_random_loop (void *data, void *arg)
@@ -76,9 +88,9 @@ thread_function (void *phash)
       //p = &a[__sync_fetch_and_add (&h->testidx, 1) % num_strings];
       action = (rnd * tid) % 100;
       if (action < 90)
-        atomic_hash_add (h, p->s, p->len, p->s, TTL_ON_ADD, NULL);
-      else if (action < 92) atomic_hash_del (h, p->s, p->len, NULL);
-      else atomic_hash_get (h, p->s, p->len, NULL);
+        atomic_hash_add (h, p->s, p->len, p->s, TTL_ON_ADD, cb_dup, NULL);
+      else if (action < 92) atomic_hash_del (h, p->s, p->len, cb_del, NULL);
+      else atomic_hash_get (h, p->s, p->len, cb_get, NULL);
 #ifdef EXITTIME
       if (now () >= t0 + EXITTIME)
 	break;
@@ -175,9 +187,12 @@ main (int argc, char **argv)
   fclose (fp);
   printf ("%ld lines to memory.\n", num_strings);
 
-  callback dtor[MAX_CALLBACK] = {NULL, NULL, cb_get, cb_del, cb_del};
-  //callback dtor[] = {NULL, NULL, NULL, NULL, NULL};
-  phash = atomic_hash_create (num_strings, TTL_ON_CREATE, dtor);
+  phash = atomic_hash_create (num_strings, TTL_ON_CREATE);
+  //phash->on_ttl = cb_del;
+  phash->on_add = cb_add;
+//  phash->on_dup = cb_dup;
+//  phash->on_get = cb_get;
+//  phash->on_del = cb_del;
   if (!phash)
     return -1;
   phash->teststr = a;
