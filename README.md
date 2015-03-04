@@ -19,36 +19,35 @@ int atomic_hash_stats (hash_t *h, unsigned int escaped_milliseconds)
 return (int): 0 for successful operation and non-zero for unsuccessful operation
 
 # Usage
-atomic_hash_add/get/del finds target bucket and holds on it for callback functions to read/copy/release user data or update ref counter. callback functions must be non-blocking to return as soon as possible, otherwise performance drops remarkablly. Define your callback funtions to access user data: 
+There are three atomic hash functions (atomic_hash_add/get/del). Generally they find target hash node, hold on it safely for a while to call hook function to read/copy/update/release user data:
 
-typedef int (*callback)(void *bucket_data, void *callback_args)
+typedef int (*hook)(void *hash_data, void *return_data)
 
-here 'bucket_data' is the input to callback function copied from 'hash_node->data' (generally a pointer to the user data structure), and 'callback_args' is output of callback function which may also take call-time input role together. It is the callback functions to take responsiblity of releasing user data. If it does it successfully, it should return 0 to tell atomic_hash to remove current hash node, otherwise, it should return non-zero. There are 5 callback functions you may want to define:
+here 'hash_data' will be copied from 'hash_node->data' (generally a pointer to the user data structure), and 'return_data' will be given by caller. The hook function must be non-blocking and spends time as less as possible, otherwise performance will drop remarkablly. The hook function should take care user data's memory if it returns -1(PLEASE_REMOVE_HASH_NODE), or simply returns either -2(PLEASE_SET_TTL_TO_DEFAULT) or a positive ttl number to indicate updating this node's expiration timer. actions for other return values are not defined. hook functions can be registered with your own hook functions after hash table is created, to replace the default ones that do not free any memory:
+  h->on_ttl = default_func_remove_node;    -- return PLEASE_REMOVE_HASH_NODE
 
-DTOR_TRY_HIT_func: atomic_hash_add will call it when the adding item's hash key exists, generally define NULL func for it if you do not want to do value/data copying or ref counter updating;
+  h->on_del = default_func_remove_node;    -- return PLEASE_REMOVE_HASH_NODE
 
-DTOR_TRY_ADD_func: atomic_hash_add will call it when adding new item, generally define NULL func for it;
+  h->on_add = default_func_not_change_ttl; -- return PLEASE_DO_NOT_CHANGE_TTL
 
-DTOR_TRY_GET_func: atomic_hash_get will call it once find target. do value/data copy or updating data in it;
+  h->on_get = default_func_not_change_ttl; -- return PLEASE_DO_NOT_CHANGE_TTL
 
-DTOR_TRY_DEL_func: atomic_hash_del will call it to release user data;
+  h->on_dup = default_func_reset_ttl;      -- return PLEASE_SET_TTL_TO_DEFAULT
 
-DTOR_EXPIRED_func: any of atomic_hash_add/get/del will call it when detecting an expired item. do remove/release user data in it;
+For more flexibility, below hash functions can use different hook functions in call-time:
 
-For example,
+atomic_hash_add(new_on_dup), atomic_hash_get(new_on_get), atomic_hash_del(new_on_del)
 
-callback dtor[] = {NULL, NULL, DTOR_TRY_GET_func, DTOR_TRY_DEL_func, NULL};
-
-ph = atomic_hash_create (max_nodes_num, 0, dtor);
 
 #About TTL
-TTL (in milliseconds) is designed to enable expire feature in hash table as a cache. Set 'lookup_reset_ttl' to 0 to disable this feature so that all hash items never expire. If lookup_reset_ttl is set to >0, you still can set 'initial_ttl' to 0 to mark hash items that never expire.
+TTL (in milliseconds) is designed to enable timer for hash nodes. Set 'reset_ttl' to 0 to disable this feature so that all hash items never expire. If reset_ttl is set to >0, you still can set 'init_ttl' to 0 to mark specified hash items that never expire.
 
-lookup_reset_ttl: each successful lookup by atomic_hash_add or atomic_hash_get will automatically reset target item's hash_node->expire to (now + lookup_reset_ttl).
+reset_ttl: atomic_hash_create uses it to set hash_node->expire. each successful lookup by atomic_hash_add or atomic_hash_get may reset target hash node's hash_node->expire to (now + reset_ttl), per your on_dup / on_get hook functions;
 
-initial_ttl：new item's hash_noe->expire is set to (now + initial_ttl) when adding to hash table. this item's hash_node->expire will NOT be reset to (now + lookup_reset_ttl) if initial_ttl == 0.
+init_ttl：atomic_hash_add uses it to set hash_node->expire to (now + init_ttl). If init_ttl == 0, hash_node will never expires as it will NOT be reset by reset_ttl.
 
-if a item's hash_node->expire == 0, atomic_hash will never call DTOR_EXPIRED callback function for this item. if hash_node->expire > 0, the item will expire when now > hash_node->expire, and after that time, this bucket item may be removed by any of hash add/get/del calls that traverses it (this also means, no active cleanup thread to clear expired item). So release your own data in your DTOR_EXPIRED callback function!!!
+hash_node->expire: hash node's 'expire' field. If expire == 0, this hash node will never expire; If expire > 0, this hash node will become expired when current time is larger than expire, but no removal action immediately applies on it. However, since it's expired, it may be removed by any of hash add/get/del calls that traverses it (in another words, no active cleanup thread to clear expired item). So your must free user data's memory in your own hash_handle->on_ttl hook function!!!
+
 
 #Installation
 

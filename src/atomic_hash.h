@@ -30,9 +30,9 @@ typedef int (* hook) (void *hash_data, void *rtn_data);
 
 /* callback function idx */
 #define PLEASE_REMOVE_HASH_NODE    -1
-#define PLEASE_DO_NOT_CHANGE_TTL   -2
-#define PLEASE_SET_TTL_TO_DEFAULT  -3
-#define PLEASE_SET_TTL_TO(n)      (n)
+#define PLEASE_SET_TTL_TO_DEFAULT  -2
+#define PLEASE_DO_NOT_CHANGE_TTL   -3
+#define PLEASE_SET_TTL_TO(n)       (n)
 
 //#define MD5HASH
 //#define MURMUR3HASH_128
@@ -122,37 +122,36 @@ typedef struct hash
   shared unsigned long testidx, teststr_num;
 } hash_t;
 
+
 /*
 Summary
-atomic hash is a lock-free hash table designed for multiple threads to share cache or data with up to 2^32 items. It allows multiple threads to concurrent read/write/delete hash items without locks. 5M~20M ops/s can be performed in morden computer platform.
-By giving max hash item number and expected collision rate, atomic_hash calculates two load factors and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving. Both of successful and unsuccessful search from the hash table are O(1)
+This is a hash table designed with high performance, lock-free and memory-saving. Multiple threads can concurrently perform read/write/delete operations up to 10M ops/s in mordern computer platform. It supports up to 2^32 hash items with O(1) performance for both of successful and unsuccessful search from the hash table.
+By giving max hash item number and expected collision rate, atomic_hash calculates two load factors and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving. 
 
 Usage
-atomic_hash_add/get/del finds target bucket and holds on it for callback functions to read/copy/release user data or update ref counter. callback functions must be non-blocking to return as soon as possible, otherwise performance drops remarkablly. Define your callback funtions to access user data:
-typedef int (*callback)(void *bucket_data, void *callback_args)
-here 'bucket_data' is the input to callback function copied from 'hash_node->data' (generally a pointer to the user data structure), and 'callback_args' is output of callback function which may also take call-time input role together. It is the callback functions to take responsiblity of releasing user data. If it does it successfully, it should return 0 to tell atomic_hash to remove current hash node, otherwise, it should return non-zero. There are 5 callback functions you may want to define:
-DTOR_TRY_HIT_func: atomic_hash_add will call it when the adding item's hash key exists, generally define NULL func for it if you do not want to do value/data copying or ref counter updating;
-DTOR_TRY_ADD_func: atomic_hash_add will call it when adding new item, generally define NULL func for it;
-DTOR_TRY_GET_func: atomic_hash_get will call it once find target. do value/data copy or updating data in it;
-DTOR_TRY_DEL_func: atomic_hash_del will call it to release user data;
-DTOR_EXPIRED_func: any of atomic_hash_add/get/del will call it when detecting an expired item. do remove/release user data in it;
-For example,
-callback dtor[] = {NULL, NULL, DTOR_TRY_GET_func, DTOR_TRY_DEL_func, NULL};
-ph = atomic_hash_create (max_nodes_num, 0, dtor);
+There are three atomic hash functions (atomic_hash_add/get/del). Generally they find target hash node, hold on it safely for a while to call hook function to read/copy/update/release user data:
+typedef int (*hook)(void *hash_data, void *return_data)
+here 'hash_data' will be copied from 'hash_node->data' (generally a pointer to the user data structure), and 'return_data' will be given by caller. The hook function must be non-blocking and spends time as less as possible, otherwise performance will drop remarkablly. The hook function should take care user data's memory if it returns -1(PLEASE_REMOVE_HASH_NODE), or simply returns either -2(PLEASE_SET_TTL_TO_DEFAULT) or a positive ttl number to indicate updating this node's expiration timer. actions for other return values are not defined. hook functions can be registered with your own hook functions after hash table is created, to replace the default ones that do not free any memory:
+  h->on_ttl = default_func_remove_node;    -- return PLEASE_REMOVE_HASH_NODE
+  h->on_del = default_func_remove_node;    -- return PLEASE_REMOVE_HASH_NODE
+  h->on_add = default_func_not_change_ttl; -- return PLEASE_DO_NOT_CHANGE_TTL
+  h->on_get = default_func_not_change_ttl; -- return PLEASE_DO_NOT_CHANGE_TTL
+  h->on_dup = default_func_reset_ttl;      -- return PLEASE_SET_TTL_TO_DEFAULT
+For more flexibility, below hash functions can use different hook functions in call-time:
+atomic_hash_add(new_on_dup), atomic_hash_get(new_on_get), atomic_hash_del(new_on_del)
 
 About TTL
-TTL (in milliseconds) is designed to enable expire feature in hash table as a cache. Set 'lookup_reset_ttl' to 0 to disable this feature so that all hash items never expire. If lookup_reset_ttl is set to >0, you still can set 'initial_ttl' to 0 to mark hash items that never expire.
-lookup_reset_ttl: each successful lookup by atomic_hash_add or atomic_hash_get will automatically reset target item's hash_node->expire to (now + lookup_reset_ttl).
-initial_ttl：new item's hash_noe->expire is set to (now + initial_ttl) when adding to hash table. this item's hash_node->expire will NOT be reset to (now + lookup_reset_ttl) if initial_ttl == 0.
-if a item's hash_node->expire == 0, atomic_hash will never call DTOR_EXPIRED callback function for this item. if hash_node->expire > 0, the item will expire when now > hash_node->expire, and after that time, this bucket item may be removed by any of hash add/get/del calls that traverses it (this also means, no active cleanup thread to clear expired item). So release your own data in your DTOR_EXPIRED callback function!!!
+TTL (in milliseconds) is designed to enable timer for hash nodes. Set 'reset_ttl' to 0 to disable this feature so that all hash items never expire. If reset_ttl is set to >0, you still can set 'init_ttl' to 0 to mark specified hash items that never expire.
+reset_ttl: atomic_hash_create uses it to set hash_node->expire. each successful lookup by atomic_hash_add or atomic_hash_get may reset target item's hash_node->expire to (now + reset_ttl), per your on_dup / on_get hook functions;
+init_ttl：atomic_hash_add uses it to set hash_node->expire to (now + init_ttl). If init_ttl == 0, hash_node will never expires as it will NOT be reset by reset_ttl.
+hash_node->expire: hash node's 'expire' field. If expire == 0, this hash node will never expire; If expire > 0, this hash node will become expired when current time is larger than expire, but no removal action immediately applies on it. However, since it's expired, it may be removed by any of hash add/get/del calls that traverses it (in another words, no active cleanup thread to clear expired item). So your must free user data's memory in your own hash_handle->on_ttl hook function!!!
 */
 
 /* return (int): 0 for successful operation and non-zero for unsuccessful operation */
-hash_t * atomic_hash_create (unsigned int max_nodes, int lookup_reset_ttl);
+hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
 int atomic_hash_destroy (hash_t *h);
-int atomic_hash_add (hash_t *h, void *key, int key_len, void *hash_data,
-                     int initial_ttl, hook cbf_dup, void *rtn);
-int atomic_hash_del (hash_t *h, void *key, int key_len, hook cbf, void *rtn); //delete all matches
-int atomic_hash_get (hash_t *h, void *key, int key_len, hook cbf, void *rtn); //get the first match
+int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook func_on_dup, void *out);
+int atomic_hash_del (hash_t *h, void *key, int key_len, hook func_on_del, void *out); //delete all matches
+int atomic_hash_get (hash_t *h, void *key, int key_len, hook func_on_get, void *out); //get the first match
 int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
 #endif
