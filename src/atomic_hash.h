@@ -104,11 +104,7 @@ typedef struct hash
 /* hash function, here select cityhash_128 as default */
   shared void (* hash_func) (const void *key, size_t len, void *r);
 
-/* destructor function, must non-block return as soon as possible !!! 
- * increase NHP if you cannot get them faster
- * return 0 to indicate removing the hash node
- * */
-//  callback func to deal with user data in safe zone
+/* hook func to deal with user data in safe zone */
   shared hook on_ttl, on_add, on_dup, on_get, on_del;
   shared volatile cas_t freelist; /* free hash node list */
   shared htab_t ht[3]; /* ht[2] for array [MINTAB] */
