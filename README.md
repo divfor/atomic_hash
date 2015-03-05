@@ -16,30 +16,24 @@ int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int ini
 int atomic_hash_del (hash_t *h, void *key, int key_len, hook func_on_del, void *out); //delete all matches
 int atomic_hash_get (hash_t *h, void *key, int key_len, hook func_on_get, void *out); //get the first match
 ```
-Not like normal hash functions that return user data directly, atomic hash functions return status code -- 0 for successful operation and non-zero for unsuccessful operation. Instead, atomic hash functions call hook functions to deal with user data once they find a target hash node. the hook functions should be defined as following format:
+Not like normal hash functions that return user data directly, atomic hash functions return status code -- 0 for successful operation and non-zero for unsuccessful operation. Instead, atomic hash functions call hook functions to deal with user data once they find target hash node. The hook functions should be defined as following format:
 ```c
 typedef int (*hook)(void *hash_data, void *out)
 ```
-here 'hash_data' will be copied from target hash node's 'data' field by atomic hash functions (generally it is a pointer to link the user data), and 'out' will be given by atomic hash function's caller. The hook function should obey below rules:
+here 'hash_data' will be copied from target hash node's 'data' field by atomic hash functions (generally it is a pointer to link the user data), and 'out' will be given by atomic hash function's caller. There are 5 function pointers (on_ttl, on_del, on_add, on_get and on_dup) to resigster hook functions. The hook function should obey below rules:
 ```c
-1. must be non-blocking and spends time as less as possible, otherwise performance will drop remarkablly;
-2. move out or free user data's memory if it returns -1(PLEASE_REMOVE_HASH_NODE) to indicate deleting this hash node;
-3. returns -2 (PLEASE_SET_TTL_TO_DEFAULT) or a positive ttl number if caller wants to indicate hash function to update this hash node's expiration timer;
+1. must be non-blocking and essential actions only. too much execution time will drop performance remarkablly;
+2. on_ttl and on_del should free/move away user data and must return -1(PLEASE_REMOVE_HASH_NODE).
+3. on_get and on_dup may return either -2 (PLEASE_SET_TTL_TO_DEFAULT) or a positive number that indicates updating ttl;
+4. on_add must return -3 (PLEASE_DO_NOT_CHANGE_TTL) as ttl will be set by intital_ttl;
 ```
-atomic_hash_create will register below built-in hook functions as default to hash_handle function pointers on_ttl/on_del/on_add/on_get/on_dup. The built-in hook functions only do value-copy of hash node's 'data' field and then return code:
-```c
-  h->on_ttl = default_func_remove_node;    //must return PLEASE_REMOVE_HASH_NODE
-  h->on_del = default_func_remove_node;    //must return PLEASE_REMOVE_HASH_NODE
-  h->on_add = default_func_not_change_ttl; //must return PLEASE_DO_NOT_CHANGE_TTL (ttl given by initial_ttl)
-  h->on_get = default_func_not_change_ttl; //may return PLEASE_DO_NOT_CHANGE_TTL or a positive number
-  h->on_dup = default_func_reset_ttl;      //may return PLEASE_SET_TTL_TO_DEFAULT or a positive number
-  ```
-So you need to write your own hook functions with above return code requirements to replace default ones if you want to free/move away your user data's memeory or adjust ttl in the fly.
+atomic_hash_create will register below built-in hook functions as default. The built-in hook functions only do value-copy for hash node's 'data' field and then return code. So you need to write your own hook functions to replace default ones if you want to free/move away your user data's memeory or adjust ttl in the fly.
 ```c
 h->on_ttl = your_own_remove_node;
 h->on_add = your_own_on_add_hook_fun
+...
 ```
-At last, as listed above, hash functions atomic_hash_add, atomic_hash_get, atomic_hash_del are able to replace hook function in call-time. This will increase flexibility to deal with different user data type in a same hash table.
+At last, as listed above, hash functions atomic_hash_add, atomic_hash_get, atomic_hash_del are able to use call-time hook function on_dup, on_get, on_del instead of registered ones. This will give flexibility to deal with different user data type in a same hash table.
 
 
 #About TTL
