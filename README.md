@@ -4,17 +4,27 @@ This is a hash table designed with high performance, lock-free and memory-saving
 By giving max hash item number, atomic_hash calculates two load factors to match expected collision rate and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving.
 
 #Hash Functions
-return 0 for successful operation and non-zero for unsuccessful operation
+There are three atomic hash functions (atomic_hash_add, atomic_hash_get, atomic_hash_del). Not like normal hash functions that return user data directly, atomic hash functions return status code -- 0 for successful operation and non-zero for unsuccessful operation. Instead, atomic hash functions call hook functions to deal with user data once they find a target hash node. 
+
 ```c
-hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
-int atomic_hash_destroy (hash_t *h);
 int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook func_on_dup, void *out);
 int atomic_hash_del (hash_t *h, void *key, int key_len, hook func_on_del, void *out); //delete all matches
 int atomic_hash_get (hash_t *h, void *key, int key_len, hook func_on_get, void *out); //get the first match
-int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
 ```
 
 # Usage
+Firstly, use atomic_hash_create to get a hash handle that assosiates its hash tables and memory pool.
+```c
+hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
+```
+Then this hash handle can be used by all threads to call atomic_hash_add/get/del concurrently, or call atomic_hash_stats to get hash table statistics:
+```c
+int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
+```
+At last, call atomic_hash_detroy function to free hash tables and its memeory.
+```c
+int atomic_hash_destroy (hash_t *h);
+```
 There are three atomic hash functions (atomic_hash_add/get/del). Generally they find target hash node, hold on it safely for a while to call hook function to read/copy/update/release user data:
 ```c
 typedef int (*hook)(void *hash_data, void *return_data)
