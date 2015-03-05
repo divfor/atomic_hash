@@ -30,7 +30,7 @@ here 'hash_data' will be copied from target hash node's 'data' field by atomic h
 atomic_hash_create will initialize some built-in functions as default hook functions that only do value-copy for hash node's 'data' field and then return code. So you need to write your own hook functions to replace default ones if you want to free your user data's memeory or adjust ttl in the fly:
 ```c
 h->on_ttl = your_own_remove_node;
-h->on_add = your_own_on_add_hook_fun
+h->on_add = your_own_on_add_hook_fun;
 ...
 ```
 In the call time, instead of hook functions registered in on_dup/on_get/on_del, hash functions atomic_hash_add, atomic_hash_get, atomic_hash_del are able to use an alertative function as long as they obey above hook function rules. This will give flexibility to deal with different user data type in a same hash table.
