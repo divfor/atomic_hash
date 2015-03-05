@@ -5,37 +5,28 @@ By giving max hash item number, atomic_hash calculates two load factors to match
 
 #Hash Functions
 return 0 for successful operation and non-zero for unsuccessful operation
-
+```c
 hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
-
 int atomic_hash_destroy (hash_t *h);
-
 int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook func_on_dup, void *out);
-
 int atomic_hash_del (hash_t *h, void *key, int key_len, hook func_on_del, void *out); //delete all matches
-
 int atomic_hash_get (hash_t *h, void *key, int key_len, hook func_on_get, void *out); //get the first match
-
 int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
-
+```
 
 # Usage
 There are three atomic hash functions (atomic_hash_add/get/del). Generally they find target hash node, hold on it safely for a while to call hook function to read/copy/update/release user data:
-
+```c
 typedef int (*hook)(void *hash_data, void *return_data)
-
+```
 here 'hash_data' will be copied from 'hash_node->data' (generally a pointer to the user data structure), and 'return_data' will be given by caller. The hook function must be non-blocking and spends time as less as possible, otherwise performance will drop remarkablly. The hook function should take care user data's memory if it returns -1(PLEASE_REMOVE_HASH_NODE), or simply returns either -2(PLEASE_SET_TTL_TO_DEFAULT) or a positive ttl number to indicate updating this node's expiration timer. actions for other return values are not defined. hook functions can be registered with your own hook functions after hash table is created, to replace the default ones that do not free any memory:
-
-  h->on_ttl = default_func_remove_node;    -- return PLEASE_REMOVE_HASH_NODE
-
-  h->on_del = default_func_remove_node;    -- return PLEASE_REMOVE_HASH_NODE
-
-  h->on_add = default_func_not_change_ttl; -- return PLEASE_DO_NOT_CHANGE_TTL
-
-  h->on_get = default_func_not_change_ttl; -- return PLEASE_DO_NOT_CHANGE_TTL
-
-  h->on_dup = default_func_reset_ttl;      -- return PLEASE_SET_TTL_TO_DEFAULT
-
+```c
+  h->on_ttl = default_func_remove_node;    //this default hook func returns PLEASE_REMOVE_HASH_NODE
+  h->on_del = default_func_remove_node;    //this default hook func returns PLEASE_REMOVE_HASH_NODE
+  h->on_add = default_func_not_change_ttl; //this default hook func returns PLEASE_DO_NOT_CHANGE_TTL
+  h->on_get = default_func_not_change_ttl; //this default hook func returns PLEASE_DO_NOT_CHANGE_TTL
+  h->on_dup = default_func_reset_ttl;      //this default hook func returns PLEASE_SET_TTL_TO_DEFAULT
+  ```
 For more flexibility, below hash functions can use different hook functions in call-time:
 
 atomic_hash_add(new_on_dup), atomic_hash_get(new_on_get), atomic_hash_del(new_on_del)
