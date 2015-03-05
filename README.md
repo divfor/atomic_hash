@@ -3,43 +3,43 @@ This is a hash table designed with high performance, lock-free and memory-saving
 
 By giving max hash item number, atomic_hash calculates two load factors to match expected collision rate and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving.
 
-#Hash Functions
-There are three atomic hash functions (atomic_hash_add, atomic_hash_get, atomic_hash_del). Not like normal hash functions that return user data directly, atomic hash functions return status code -- 0 for successful operation and non-zero for unsuccessful operation. Instead, atomic hash functions call hook functions to deal with user data once they find a target hash node. 
-
+# Usage
+Use below functions to create a hash handle that assosiates its arrays and memory pool, print statistics of it, or release it.
+```c
+hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
+int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
+int atomic_hash_destroy (hash_t *h);
+```
+The hash handle can be copied to any number of threads for calling below hash functions: 
 ```c
 int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook func_on_dup, void *out);
 int atomic_hash_del (hash_t *h, void *key, int key_len, hook func_on_del, void *out); //delete all matches
 int atomic_hash_get (hash_t *h, void *key, int key_len, hook func_on_get, void *out); //get the first match
 ```
-
-# Usage
-Firstly, use atomic_hash_create to get a hash handle that assosiates its hash tables and memory pool.
+Not like normal hash functions that return user data directly, atomic hash functions return status code -- 0 for successful operation and non-zero for unsuccessful operation. Instead, atomic hash functions call hook functions to deal with user data once they find a target hash node. the hook functions should be defined as following format:
 ```c
-hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
+typedef int (*hook)(void *hash_data, void *out)
 ```
-Then this hash handle can be used by all threads to call atomic_hash_add/get/del concurrently, or call atomic_hash_stats to get hash table statistics:
+here 'hash_data' will be copied from target hash node's 'data' field by atomic hash functions (generally it is a pointer to link the user data), and 'out' will be given by atomic hash function's caller. The hook function should obey below rules:
 ```c
-int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
+1. must be non-blocking and spends time as less as possible, otherwise performance will drop remarkablly;
+2. move out or free user data's memory if it returns -1(PLEASE_REMOVE_HASH_NODE) to indicate deleting this hash node;
+3. returns -2 (PLEASE_SET_TTL_TO_DEFAULT) or a positive ttl number if caller wants to indicate hash function to update this hash node's expiration timer;
 ```
-At last, call atomic_hash_detroy function to free hash tables and its memeory.
+atomic_hash_create will register below built-in hook functions as default to hash_handle function pointers on_ttl/on_del/on_add/on_get/on_dup. The built-in hook functions only do value-copy of hash node's 'data' field and then return code:
 ```c
-int atomic_hash_destroy (hash_t *h);
-```
-There are three atomic hash functions (atomic_hash_add/get/del). Generally they find target hash node, hold on it safely for a while to call hook function to read/copy/update/release user data:
-```c
-typedef int (*hook)(void *hash_data, void *return_data)
-```
-here 'hash_data' will be copied from 'hash_node->data' (generally a pointer to the user data structure), and 'return_data' will be given by caller. The hook function must be non-blocking and spends time as less as possible, otherwise performance will drop remarkablly. The hook function should take care user data's memory if it returns -1(PLEASE_REMOVE_HASH_NODE), or simply returns either -2(PLEASE_SET_TTL_TO_DEFAULT) or a positive ttl number to indicate updating this node's expiration timer. actions for other return values are not defined. hook functions can be registered with your own hook functions after hash table is created, to replace the default ones that do not free any memory:
-```c
-  h->on_ttl = default_func_remove_node;    //this default hook func returns PLEASE_REMOVE_HASH_NODE
-  h->on_del = default_func_remove_node;    //this default hook func returns PLEASE_REMOVE_HASH_NODE
-  h->on_add = default_func_not_change_ttl; //this default hook func returns PLEASE_DO_NOT_CHANGE_TTL
-  h->on_get = default_func_not_change_ttl; //this default hook func returns PLEASE_DO_NOT_CHANGE_TTL
-  h->on_dup = default_func_reset_ttl;      //this default hook func returns PLEASE_SET_TTL_TO_DEFAULT
+  h->on_ttl = default_func_remove_node;    //must return PLEASE_REMOVE_HASH_NODE
+  h->on_del = default_func_remove_node;    //must return PLEASE_REMOVE_HASH_NODE
+  h->on_add = default_func_not_change_ttl; //must return PLEASE_DO_NOT_CHANGE_TTL (ttl given by initial_ttl)
+  h->on_get = default_func_not_change_ttl; //may return PLEASE_DO_NOT_CHANGE_TTL or a positive number
+  h->on_dup = default_func_reset_ttl;      //may return PLEASE_SET_TTL_TO_DEFAULT or a positive number
   ```
-For more flexibility, below hash functions can use different hook functions in call-time:
-
-atomic_hash_add(new_on_dup), atomic_hash_get(new_on_get), atomic_hash_del(new_on_del)
+So you need to write your own hook functions with above return code requirements to replace default ones if you want to free/move away your user data's memeory or adjust ttl in the fly.
+```c
+h->on_ttl = your_own_remove_node;
+h->on_add = your_own_on_add_hook_fun
+```
+At last, as listed above, hash functions atomic_hash_add, atomic_hash_get, atomic_hash_del are able to replace hook function in call-time. This will increase flexibility to deal with different user data type in a same hash table.
 
 
 #About TTL
