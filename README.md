@@ -43,18 +43,3 @@ reset_ttl: atomic_hash_create uses it to set hash_node->expire. each successful 
 init_ttl：atomic_hash_add uses it to set hash_node->expire to (now + init_ttl). If init_ttl == 0, hash_node will never expires as it will NOT be reset by reset_ttl.
 
 hash_node->expire: hash node's 'expire' field. If expire == 0, this hash node will never expire; If expire > 0, this hash node will become expired when current time is larger than expire, but no removal action immediately applies on it. However, since it's expired, it may be removed by any of hash add/get/del calls that traverses it (in another words, no active cleanup thread to clear expired item). So your must free user data's memory in your own hash_handle->on_ttl hook function!!!
-
-
-#Installation
-
-Step 1, build dynamic shared libatomic_hash.so: 
-
-cd src && make clean && make
-
-
-Step 2, copy libatomic_hash.so to /usr/lib64/ and atomic_hash.h to /usr/include/
-
-make install
-
-
-Step 3, include "atomic_hash.h" in your source file(s) and dynamic link atomic_hash lib to your program. see test/makefile example
