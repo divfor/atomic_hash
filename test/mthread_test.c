@@ -20,8 +20,8 @@
 
 #define time_after(a,b) ((b) > (a) || (long)(b) - (long)(a) < 0)
 #define time_before(a,b)  time_after(b,a)
-#define TTL_ON_ADD 0
-#define TTL_ON_CREATE 0
+#define TTL_ON_ADD 100
+#define TTL_ON_CREATE 450
 
 typedef struct teststr {
   char *s;
@@ -81,16 +81,38 @@ thread_function (void *phash)
   unsigned long t0 = now ();
 #endif
   int tid = syscall (SYS_gettid);
+  char *str = NULL, *buf = NULL;
+  int ret;
   while (1)
     {
+      buf = NULL;
       rnd = mt_rand();
       p = &a[rnd % num_strings];
       //p = &a[__sync_fetch_and_add (&h->testidx, 1) % num_strings];
       action = (rnd * tid) % 100;
       if (action < 90)
-        atomic_hash_add (h, p->s, p->len, p->s, TTL_ON_ADD, cb_dup, NULL);
-      else if (action < 92) atomic_hash_del (h, p->s, p->len, cb_del, NULL);
-      else atomic_hash_get (h, p->s, p->len, cb_get, NULL);
+        {
+          str = strdup (p->s);
+          //ret = atomic_hash_add (h, p->s, p->len, str, TTL_ON_ADD, NULL, &buf);
+          ret = atomic_hash_add (h, p->s, p->len, str, 0, NULL, &buf);
+          if (ret != 0)
+            free (str);
+        }
+      else if (action < 92)
+        {
+          ret = atomic_hash_del (h, p->s, p->len, NULL, &buf);
+          if (ret == 0)
+            free (buf);
+        }
+      else 
+        {
+          ret = atomic_hash_get (h, p->s, p->len, NULL, &buf);
+          if (ret == 0)
+           {
+             str = strdup (p->s);
+             free (str);
+           }
+        }
 #ifdef EXITTIME
       if (now () >= t0 + EXITTIME)
 	break;
