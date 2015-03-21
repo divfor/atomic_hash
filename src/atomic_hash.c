@@ -45,7 +45,7 @@
 #define NNULL 0xFFFFFFFF
 #define MAXTAB NNULL
 #define MINTAB 64
-#define COLLISION 1 //0.01 ~> avg 25 in seat
+#define COLLISION 1000 //0.01 ~> avg 25 in seat
 #define MAXBLOCKS 1024
 
 #define memword __attribute__((aligned(sizeof(void *))))
@@ -633,7 +633,12 @@ atomic_hash_add (hash_t *h, void *kwd, int len, void *data,
   nid ni = NNULL;
   unsigned long now = nowms ();
 
-  h->hash_func (kwd, len, &t);
+  if (len > 0)
+    h->hash_func (kwd, len, &t);
+  else if (len == 0)
+    memcpy (&t, kwd, sizeof(t));
+  else
+    return -3; /* key length not defined */
   collect_hash_pos (t.d, a);
   for (j = 0; j < NSEAT; j++)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
@@ -681,7 +686,12 @@ atomic_hash_get (hash_t *h, void *kwd, int len, hook cbf, void *arg)
   memword union { hv v; nid d[NKEY]; } t;
   unsigned long now = nowms ();
 
-  h->hash_func (kwd, len, &t);
+  if (len > 0)
+    h->hash_func (kwd, len, &t);
+  else if (len == 0)
+    memcpy (&t, kwd, sizeof(t));
+  else
+    return -3; /* key length not defined */
   collect_hash_pos (t.d, a);
   for (j = 0; j < NSEAT; j++)
     if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
@@ -709,7 +719,12 @@ atomic_hash_del (hash_t *h, void *kwd, int len, hook cbf, void *arg)
   memword union { hv v; nid d[NKEY]; } t;
   unsigned long now = nowms ();
 
-  h->hash_func (kwd, len, &t);
+  if (len > 0)
+    h->hash_func (kwd, len, &t);
+  else if (len == 0)
+    memcpy (&t, kwd, sizeof(t));
+  else
+    return -3; /* key length not defined */
   collect_hash_pos (t.d, a);
   i = 0; /* delete all matches */
   for (j = 0; j < NSEAT; j++)

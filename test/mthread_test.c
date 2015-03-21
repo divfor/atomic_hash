@@ -25,6 +25,7 @@
 
 typedef struct teststr {
   char *s;
+  uint64_t hv[2];
   int len;
 } teststr_t;
 
@@ -94,23 +95,26 @@ thread_function (void *phash)
         {
           str = strdup (p->s);
           //ret = atomic_hash_add (h, p->s, p->len, str, TTL_ON_ADD, NULL, &buf);
-          ret = atomic_hash_add (h, p->s, p->len, str, 0, NULL, &buf);
+          ret = atomic_hash_add (h, p->s, p->len, str, action*90, NULL, &buf);
+          //ret = atomic_hash_add (h, p->hv, 0, str, action*90, NULL, &buf);
           if (ret != 0)
             free (str);
         }
       else if (action < 92)
         {
           ret = atomic_hash_del (h, p->s, p->len, NULL, &buf);
+          //ret = atomic_hash_del (h, p->hv, 0, NULL, &buf);
           if (ret == 0)
             free (buf);
         }
       else 
         {
           ret = atomic_hash_get (h, p->s, p->len, NULL, &buf);
+          //ret = atomic_hash_get (h, p->hv, 0, NULL, &buf);
           if (ret == 0)
            {
-             str = strdup (p->s);
-             free (str);
+             //str = strdup (p->s);  free (str);
+             ret = strcmp(p->s, buf);
            }
         }
 #ifdef EXITTIME
@@ -118,7 +122,8 @@ thread_function (void *phash)
 	break;
 #endif
     }
-  return NULL;
+  if (ret)
+    return NULL;
 }
 
 void *
@@ -170,7 +175,7 @@ main (int argc, char **argv)
   char sbuf[1024];
   teststr_t *a = NULL;
   FILE *fp = NULL;
-  hash_t *phash = NULL;
+  hash_t *ptmp, *phash = NULL;
   int cpu_num = sysconf(_SC_NPROCESSORS_ONLN);
   int thread_num;
   
@@ -190,6 +195,7 @@ main (int argc, char **argv)
   if (!(fp = fopen (argv[1], "r")))
     return -1;
   num_strings = 0;
+  ptmp = phash = atomic_hash_create (100, TTL_ON_CREATE);
   while (num_strings < nlines && fgets (sbuf, 1023, fp))
     { 
       if ((sl = strlen (sbuf)) < 1)
@@ -204,10 +210,12 @@ main (int argc, char **argv)
          return -1;
        }
       a[num_strings].len = strlen(a[num_strings].s);
+      ptmp->hash_func (a[num_strings].s, a[num_strings].len, a[num_strings].hv);
       num_strings++;
     }
   fclose (fp);
   printf ("%ld lines to memory.\n", num_strings);
+  atomic_hash_destroy (ptmp);
 
   phash = atomic_hash_create (num_strings, TTL_ON_CREATE);
   //phash->on_ttl = cb_del;
@@ -219,7 +227,6 @@ main (int argc, char **argv)
     return -1;
   phash->teststr = a;
   phash->teststr_num = num_strings;
-
   mt_srand(now());
 
   thread_num = (NT <= 8 ? NT : set_cpus (cpu_num));
