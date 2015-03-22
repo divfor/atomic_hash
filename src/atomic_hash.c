@@ -45,7 +45,7 @@
 #define NNULL 0xFFFFFFFF
 #define MAXTAB NNULL
 #define MINTAB 64
-#define COLLISION 1000 //0.01 ~> avg 25 in seat
+#define COLLISION 10000 //0.01 ~> avg 25 in seat
 #define MAXBLOCKS 1024
 
 #define memword __attribute__((aligned(sizeof(void *))))

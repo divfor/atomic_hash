@@ -12,8 +12,10 @@
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
 #include <sys/time.h>
+#include <assert.h>
 #include "atomic_hash.h"
 #include "mtrand.h"
+
 
 //#define EXITTIME 20000
 #define NT 16
@@ -39,8 +41,6 @@ now ()
 
 int cb_dup (void *data, void *arg)
 {
-  char * buf = strdup(data);
-  free (buf);
   return PLEASE_SET_TTL_TO_DEFAULT;
 }
 
@@ -51,15 +51,19 @@ int cb_add (void *data, void *arg)
 
 int cb_get (void *data, void *arg)
 {
-  char * buf = strdup(data);
-  free (buf);
+  *((void **)arg) = strdup(data);
   return PLEASE_DO_NOT_CHANGE_TTL;
 }
 
 int cb_del (void *data, void *arg)
 {
-  char * buf = strdup(data);
-  free (buf);
+  free (data);
+  return PLEASE_REMOVE_HASH_NODE;
+}
+
+int cb_ttl (void *data, void *arg)
+{
+  free (data);
   return PLEASE_REMOVE_HASH_NODE;
 }
 
@@ -102,10 +106,8 @@ thread_function (void *phash)
         }
       else if (action < 92)
         {
-          ret = atomic_hash_del (h, p->s, p->len, NULL, &buf);
+          ret = atomic_hash_del (h, p->s, p->len, cb_del, &buf);
           //ret = atomic_hash_del (h, p->hv, 0, NULL, &buf);
-          if (ret == 0)
-            free (buf);
         }
       else 
         {
@@ -115,6 +117,8 @@ thread_function (void *phash)
            {
              //str = strdup (p->s);  free (str);
              ret = strcmp(p->s, buf);
+             free (buf);
+             assert (ret == 0);
            }
         }
 #ifdef EXITTIME
@@ -218,11 +222,11 @@ main (int argc, char **argv)
   atomic_hash_destroy (ptmp);
 
   phash = atomic_hash_create (num_strings, TTL_ON_CREATE);
-  //phash->on_ttl = cb_del;
   phash->on_add = cb_add;
-//  phash->on_dup = cb_dup;
-//  phash->on_get = cb_get;
-//  phash->on_del = cb_del;
+  phash->on_ttl = cb_ttl;
+  phash->on_dup = cb_dup;
+  phash->on_get = cb_get;
+  phash->on_del = cb_del;
   if (!phash)
     return -1;
   phash->teststr = a;

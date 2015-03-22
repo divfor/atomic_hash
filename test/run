@@ -14,6 +14,7 @@ make clean
 curr=$(pwd);
 cd $rundir;
 rm -rf gmon.out;
+exit 0
 ${rundir}/${exe} $target;
 if grep ^LINKFLAGS ${curr}/${mkfile} | grep -qs '\-pg'; then
   gprof -b ${rundir}/${exe} gmon.out | less
