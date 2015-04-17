@@ -87,48 +87,10 @@ nowms ()
   return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
 }
 
-inline unsigned long
-get_power2_upper (unsigned long n)
-{
-  int i;
-  for (i = 0; (1 << i) < n; i++);
-  return i;
-}
-
 mem_pool_t *
-old_create_mem_pool (unsigned int max_nodes, unsigned int node_size, unsigned int max_blocks)
+v2_create_mem_pool (int max_nodes, int node_size)
 {
-  unsigned int n, m;
-  mem_pool_t *pmp;
-
-  if (max_nodes < 1 || max_nodes > MAXTAB)
-    return NULL;
-  if (posix_memalign ((void **) (&pmp), 64, sizeof (*pmp)))
-    return NULL;
-  memset (pmp, 0, sizeof (*pmp));
-
-  pmp->curr_blocks = 0;
-  pmp->node_size = (nid) node_size;
-  m = max_blocks == 0 ? 1024 : max_blocks;
-  pmp->max_blocks = (nid)(m + 1);	/* mutiple m to make overfill possible */
-  for (pmp->shift = 0, n = 1; max_nodes > m * n; n *= 2)
-    pmp->shift++;
-  pmp->blk_node_num = (nid)n;
-  pmp->mask = (nid)(n - 1);
-  pmp->blk_size = (nid)(pmp->blk_node_num * pmp->node_size);
-  if (!posix_memalign ((void **) (&pmp->ba), 64, pmp->max_blocks * sizeof (*pmp->ba)))
-    {
-      memset (pmp->ba, 0, pmp->max_blocks * sizeof (*pmp->ba));
-      return pmp;
-    }
-  free (pmp);
-  return NULL;
-}
-
-mem_pool_t *
-create_mem_pool (int max_nodes, int node_size)
-{
-  int pwr2_max_nodes, pwr2_total_block, pwr2_node_size, pwr2_total_size, pwr2_block_size;
+  int pwr2_max_nodes, PW2_MAX_BLK_PTR, pwr2_node_size, pwr2_total_size, pwr2_block_size;
   mem_pool_t *pmp;
 
   for (pwr2_max_nodes = 0; (1 << pwr2_max_nodes) < max_nodes; pwr2_max_nodes++);
@@ -155,9 +117,9 @@ create_mem_pool (int max_nodes, int node_size)
     pwr2_block_size = 12 + 7;
   else
     pwr2_block_size = 12 + 8;
-  pwr2_total_block = (pwr2_total_size > pwr2_block_size) ? (pwr2_total_size - pwr2_block_size) : 0;
+  PW2_MAX_BLK_PTR = (pwr2_total_size > pwr2_block_size) ? (pwr2_total_size - pwr2_block_size) : 0;
 
-  pmp->max_blocks = (nid) (1 << (pwr2_total_block));
+  pmp->max_blocks = (nid) (1 << (PW2_MAX_BLK_PTR));
   pmp->node_size = (nid) (1 << pwr2_node_size);
   pmp->blk_size = (nid) (1 << pwr2_block_size);
   pmp->blk_node_num = (nid) (1 << (pwr2_block_size - pwr2_node_size));
@@ -173,6 +135,54 @@ create_mem_pool (int max_nodes, int node_size)
   free (pmp);
   return NULL;
 }
+
+mem_pool_t *
+create_mem_pool (int max_nodes, int node_size)
+{
+  int pwr2_max_nodes, pwr2_node_size, pwr2_total_size, pwr2_block_size;
+  mem_pool_t *pmp;
+
+#define PW2_MAX_BLK_PTR 9   /* hard code one 4K-page for max 512 block pointers */
+#define PW2_MIN_BLK_SIZ 12  /* 2^12 = 4K page size */
+
+  for (pwr2_max_nodes = 0; (1 << pwr2_max_nodes) < max_nodes; pwr2_max_nodes++);
+  if (pwr2_max_nodes == 0 || pwr2_max_nodes > 32) /* auto resize for exceeption, use 1MB as mem index and 1MB block size*/
+    pwr2_max_nodes = 32;
+
+  for (pwr2_node_size = 0; (1 << pwr2_node_size) < node_size; pwr2_node_size++);
+  if ((1 << pwr2_node_size) != node_size || pwr2_node_size < 5 || pwr2_node_size > 12)
+    {
+      printf("node_size should be N powe of 2, 5 <= N <= 12(4KB page)");
+      return NULL;
+    }
+
+  if (posix_memalign ((void **) (&pmp), 64, sizeof (*pmp)))
+    return NULL;
+  memset (pmp, 0, sizeof (*pmp));
+
+  pwr2_total_size = pwr2_max_nodes + pwr2_node_size;
+  if (pwr2_total_size <= PW2_MAX_BLK_PTR + PW2_MIN_BLK_SIZ)
+    pwr2_block_size = PW2_MIN_BLK_SIZ;
+  else
+    pwr2_block_size = pwr2_total_size - PW2_MAX_BLK_PTR;
+
+  pmp->max_blocks = (nid) (1 << (PW2_MAX_BLK_PTR));
+  pmp->node_size = (nid) (1 << pwr2_node_size);
+  pmp->blk_size = (nid) (1 << pwr2_block_size);
+  pmp->blk_node_num = (nid) (1 << (pwr2_block_size - pwr2_node_size));
+  pmp->shift = (nid) pwr2_block_size - pwr2_node_size;
+  pmp->mask = (nid) ((1 << pmp->shift) - 1);
+  pmp->curr_blocks = 0;
+
+  if (!posix_memalign ((void **) (&pmp->ba), 64, pmp->max_blocks * sizeof (*pmp->ba)))
+    {
+      memset (pmp->ba, 0, pmp->max_blocks * sizeof (*pmp->ba));
+      return pmp;
+    }
+  free (pmp);
+  return NULL;
+}
+
 
 int
 destroy_mem_pool (mem_pool_t * pmp)
