@@ -22,8 +22,8 @@
 
 #define time_after(a,b) ((b) > (a) || (long)(b) - (long)(a) < 0)
 #define time_before(a,b)  time_after(b,a)
-#define TTL_ON_ADD 100
-#define TTL_ON_CREATE 450
+#define TTL_ON_ADD 0
+#define TTL_ON_CREATE 0
 
 typedef struct teststr {
   char *s;
@@ -98,8 +98,8 @@ thread_function (void *phash)
       if (action < 90)
         {
           str = strdup (p->s);
-          //ret = atomic_hash_add (h, p->s, p->len, str, TTL_ON_ADD, NULL, &buf);
-          ret = atomic_hash_add (h, p->s, p->len, str, action*90, NULL, &buf);
+          ret = atomic_hash_add (h, p->s, p->len, str, TTL_ON_ADD, NULL, &buf);
+          //ret = atomic_hash_add (h, p->s, p->len, str, action*90, NULL, &buf);
           //ret = atomic_hash_add (h, p->hv, 0, str, action*90, NULL, &buf);
           if (ret != 0)
             free (str);

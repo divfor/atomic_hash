@@ -45,7 +45,7 @@
 #define NNULL 0xFFFFFFFF
 #define MAXTAB NNULL
 #define MINTAB 64
-#define COLLISION 10000 //0.01 ~> avg 25 in seat
+#define COLLISION 1000 //0.01 ~> avg 25 in seat
 #define MAXBLOCKS 1024
 
 #define memword __attribute__((aligned(sizeof(void *))))
@@ -88,58 +88,9 @@ nowms ()
 }
 
 mem_pool_t *
-v2_create_mem_pool (int max_nodes, int node_size)
+create_mem_pool (unsigned int max_nodes, unsigned int node_size)
 {
-  int pwr2_max_nodes, PW2_MAX_BLK_PTR, pwr2_node_size, pwr2_total_size, pwr2_block_size;
-  mem_pool_t *pmp;
-
-  for (pwr2_max_nodes = 0; (1 << pwr2_max_nodes) < max_nodes; pwr2_max_nodes++);
-  if (pwr2_max_nodes == 0 || pwr2_max_nodes > 32) /* auto resize for exceeption, use 1MB as mem index and 1MB block size*/
-    pwr2_max_nodes = 32;
-
-  for (pwr2_node_size = 0; (1 << pwr2_node_size) < node_size; pwr2_node_size++);
-  if ((1 << pwr2_node_size) != node_size || pwr2_node_size < 5 || pwr2_node_size > 12)
-    {
-      printf("node_size should be N powe of 2, 5 <= N <= 12(4KB page)");
-      return NULL;
-    }
-
-  if (posix_memalign ((void **) (&pmp), 64, sizeof (*pmp)))
-    return NULL;
-  memset (pmp, 0, sizeof (*pmp));
-  
-  pwr2_total_size = pwr2_max_nodes + pwr2_node_size;
-  if (pwr2_total_size <= 21) /* 2M oar less uses 32 4K-pages per block*/
-    pwr2_block_size = 12 + 5;
-  else if (pwr2_total_size == 22)
-    pwr2_block_size = 12 + 6;
-  else if (pwr2_total_size == 23)
-    pwr2_block_size = 12 + 7;
-  else
-    pwr2_block_size = 12 + 8;
-  PW2_MAX_BLK_PTR = (pwr2_total_size > pwr2_block_size) ? (pwr2_total_size - pwr2_block_size) : 0;
-
-  pmp->max_blocks = (nid) (1 << (PW2_MAX_BLK_PTR));
-  pmp->node_size = (nid) (1 << pwr2_node_size);
-  pmp->blk_size = (nid) (1 << pwr2_block_size);
-  pmp->blk_node_num = (nid) (1 << (pwr2_block_size - pwr2_node_size));
-  pmp->shift = (nid) pwr2_block_size - pwr2_node_size;
-  pmp->mask = (nid) ((1 << pmp->shift) - 1);
-  pmp->curr_blocks = 0;
-
-  if (!posix_memalign ((void **) (&pmp->ba), 64, pmp->max_blocks * sizeof (*pmp->ba)))
-    {
-      memset (pmp->ba, 0, pmp->max_blocks * sizeof (*pmp->ba));
-      return pmp;
-    }
-  free (pmp);
-  return NULL;
-}
-
-mem_pool_t *
-create_mem_pool (int max_nodes, int node_size)
-{
-  int pwr2_max_nodes, pwr2_node_size, pwr2_total_size, pwr2_block_size;
+  unsigned int pwr2_max_nodes, pwr2_node_size, pwr2_total_size, pwr2_block_size;
   mem_pool_t *pmp;
 
 #define PW2_MAX_BLK_PTR 9   /* hard code one 4K-page for max 512 block pointers */
@@ -272,7 +223,7 @@ init_htab (htab_t * ht, unsigned long num, double ratio)
   double r;
   nb = num * ratio;
   for (i = 134217728; nb > i; i *= 2);
-  nb = (nb >= 134217728) ? i : nb; // improve folding for more than 1/32 of MAXTAB (2^32)
+//  nb = (nb >= 134217728) ? i : nb; // improve folding for more than 1/32 of MAXTAB (2^32)
   ht->nb = (i > MAXTAB) ? MAXTAB : ((nb < MINTAB) ? MINTAB : nb);
   ht->n = num; //if 3rd tab: n <- 0, nb <- MINTAB, r <- COLLISION
   r = (ht->n == 0 ? ratio : ht->nb * 1.0 / ht->n);
@@ -292,7 +243,6 @@ hash_t *
 atomic_hash_create (unsigned int max_nodes, int reset_ttl)
 {
   const double collision = COLLISION;	/* collision control, larger is better */
-  const unsigned long max_blocks = MAXBLOCKS;
   hash_t *h;
   htab_t *ht1, *ht2, *at1;	/* bucket array 1, 2 and collision array */
   double K, r1, r2;
