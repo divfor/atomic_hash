@@ -601,6 +601,7 @@ valid_ttl (hash_t *h, unsigned long now, node_t *p, nid *seat, nid mi,
   return 0;
 }
 
+/*Fibonacci number: 16bit->40543, 32bit->2654435769, 64bit->11400714819323198485 */
 #if NKEY == 4
 #define collect_hash_pos(d, a)  do { register htab_t *pt; i = 0;\
   for (pt = &h->ht[0]; pt < &h->ht[NMHT]; pt++) { \
