@@ -194,7 +194,7 @@ new_mem_block (mem_pool_t * pmp, volatile cas_t * recv_queue)
   return (nid *) (p + m * sz);
 }
 
-inline int default_func_reset_ttl (void *hash_data, void *return_data)
+int default_func_reset_ttl (void *hash_data, void *return_data)
 {
   if (return_data)
     *((void **)return_data) = hash_data;
@@ -202,14 +202,14 @@ inline int default_func_reset_ttl (void *hash_data, void *return_data)
 }
 
 /* define your own func to return different ttl or removval instructions */
-inline int default_func_not_change_ttl (void *hash_data, void *return_data)
+int default_func_not_change_ttl (void *hash_data, void *return_data)
 {
   if (return_data)
     *((void **)return_data) = hash_data;
   return PLEASE_DO_NOT_CHANGE_TTL; 
 }
 
-inline int default_func_remove_node (void *hash_data, void *return_data)
+int default_func_remove_node (void *hash_data, void *return_data)
 {
   if (return_data)
     *((void **)return_data) = hash_data;

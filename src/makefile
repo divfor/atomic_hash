@@ -56,11 +56,11 @@ clean :
 	@$(RM-F) $(EXECUTABLE)
 
 install :
-	cp -pf $(EXECUTABLE) /usr/lib64/
+	cp -pf $(EXECUTABLE) /usr/lib64/ 2>/dev/null || cp -pf ${EXECUTABLE} /usr/lib/
 	cp -pf $(HEADFILE) /usr/include/
 
 uninstall :
-	@$(RM-F) /usr/lib64/$(EXECUTABLE)
+	@$(RM-F) /usr/lib64/$(EXECUTABLE) /usr/lib/${EXECUTABLE}
 	@$(RM-F) /usr/include/$(HEADFILE)
 
 rebuild: clean all

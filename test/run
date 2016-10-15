@@ -1,16 +1,20 @@
 #!/bin/sh
 
-target=${1:-'/home/hs'}
-rundir="/root"
+target=${1:-'./top-1m.csv'}
 
-(cd ../src && make clean && make uninstall && make && make install && make clean)
+cd ../test/ || exit
+[ -f "${target}" ] || tar zxf ${target}.tar.gz
+(cd ../src; make clean; make uninstall;  make; make install)
 mkfile="./makefile"
 exe=$(awk '/^EXECUTABLE/{print $NF}' ./makefile);
 
-make clean && make
-mv -f ./$exe $rundir/
 make clean
+make
 
+./${exe} ${target}
+
+################################################
+exit
 curr=$(pwd);
 cd $rundir;
 rm -rf gmon.out;
