@@ -31,6 +31,7 @@
 #include <math.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <sched.h>
 #include "atomic_hash.h"
 
 #if defined (MPQ3HASH) || defined (NEWHASH)
