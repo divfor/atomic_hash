@@ -159,7 +159,7 @@ destroy_mem_pool (mem_pool_t * pmp)
 inline nid *
 new_mem_block (mem_pool_t * pmp, volatile cas_t * recv_queue)
 {
-  nid i, m, sz, head = 0;
+  nid i, m, sz, sft, head = 0;
   memword cas_t n, x, *pn;
   void *p;
 
@@ -222,6 +222,7 @@ int
 init_htab (htab_t * ht, unsigned long num, double ratio)
 {
   unsigned long i, nb;
+  double r;
   nb = num * ratio;
   for (i = 134217728; nb > i; i *= 2);
 //  nb = (nb >= 134217728) ? i : nb; // improve folding for more than 1/32 of MAXTAB (2^32)
