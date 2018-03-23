@@ -69,17 +69,7 @@
           }} \
           if ((hv).y != (v).y || (hv).y == 0) { unhold_bucket (hv, v); return 0; } \
           } while (0)
-/*
-#define hold_bucket_otherwise_return_0(hv, v) do { unsigned long __l = (1<<24); \
-          if ((v).x == 0 || (v).y == 0) return 0; \
-          while ((hv).x == (v).x) { \
-             if (--__l == 0) { add1 (h->stats.escapes); return 0; } \
-             if (!cas(&(hv).x, (v).x, 0)) continue; \
-             if ((hv).y == 0) return 0; \
-             if ((hv).y != (v).y || !(hv).y) { unhold_bucket (hv, v); return 0; } \
-          } \
-          } while (0)
-*/
+
 
 inline unsigned long
 nowms ()
