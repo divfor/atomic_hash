@@ -48,7 +48,7 @@
 #define MINTAB 64
 #define COLLISION 1000 //0.01 ~> avg 25 in seat
 #define MAXBLOCKS 1024
-#define MAXSPIN (1<<24)
+#define MAXSPIN (1<<20) # ~5ms: 4646us
 
 #define memword __attribute__((aligned(sizeof(void *))))
 #define atomic_add1(v) __sync_fetch_and_add(&(v), 1)
