@@ -48,7 +48,7 @@
 #define MINTAB 64
 #define COLLISION 1000 //0.01 ~> avg 25 in seat
 #define MAXBLOCKS 1024
-#define MAXSPIN 2
+#define MAXSPIN (1<<24)
 
 #define memword __attribute__((aligned(sizeof(void *))))
 #define atomic_add1(v) __sync_fetch_and_add(&(v), 1)
@@ -59,14 +59,13 @@
 #define i2p(mp, type, i) (i == NNULL ? NULL : &(ip(mp, type, i)))
 //#define unhold_bucket(hv, v) do { if ((hv).y && !(hv).x) (hv).x = (v).x; } while(0)
 #define unhold_bucket(hv, v) while ((hv).y && !cas (&(hv).x, 0, (v).x))
-#define hold_bucket_otherwise_return_0(hv, v) do { unsigned long __l = (1<<24); int rep = 0; \
+#define hold_bucket_otherwise_return_0(hv, v) do { unsigned long __l = MAXSPIN; \
           while (!cas(&(hv).x, (v).x, 0)) { /* when CAS fails */ \
             if ((hv).x != (v).x) return 0; /* already released or reused */\
             while ((hv).x == 0) { /* wait for unhold */ \
               if ((hv).y == 0) return 0; /* no unhold but released */ \
-              __asm__("pause"); /* slice wait: usleep(1) or __asm__("pause") */ \
-	      if (MAXSPIN && ++rep == MAXSPIN) { rep = 0; sched_yield(); } \
               if (--__l == 0) { add1 (h->stats.escapes); return 0; } /* give up */ \
+              if (__l & 0x0f) __asm__("pause"); else sched_yield(); /*alt: usleep(1)*/ \
           }} \
           if ((hv).y != (v).y || (hv).y == 0) { unhold_bucket (hv, v); return 0; } \
           } while (0)
@@ -160,7 +159,7 @@ destroy_mem_pool (mem_pool_t * pmp)
 inline nid *
 new_mem_block (mem_pool_t * pmp, volatile cas_t * recv_queue)
 {
-  nid i, m, sft, sz, head = 0;
+  nid i, m, sz, head = 0;
   memword cas_t n, x, *pn;
   void *p;
 
@@ -223,7 +222,6 @@ int
 init_htab (htab_t * ht, unsigned long num, double ratio)
 {
   unsigned long i, nb;
-  double r;
   nb = num * ratio;
   for (i = 134217728; nb > i; i *= 2);
 //  nb = (nb >= 134217728) ? i : nb; // improve folding for more than 1/32 of MAXTAB (2^32)
