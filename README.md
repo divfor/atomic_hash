@@ -3,6 +3,9 @@ This is a hash table designed with high performance, lock-free and memory-saving
 
 By giving max hash item number, atomic_hash calculates two load factors to match expected collision rate and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving.
 
+A design description (in chinese) is posted here:
+https://blog.csdn.net/divfor/article/details/44316291
+
 # Usage
 Use below functions to create a hash handle that assosiates its arrays and memory pool, print statistics of it, or release it.
 ```c
