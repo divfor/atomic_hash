@@ -1,3 +1,13 @@
+# Changelog
+* Opaque data type
+* CMake support
+  * Selection of to be used function (currently only HashCity & MD5 (NOTE: Requires `libssl-dev`))
+* Resolved compiler warnings
+
+For detailed list, see *Changelog* in [src/atomic_hash.c](src/atomic_hash.c)
+
+
+---
 # Summary
 This is a hash table designed with high performance, lock-free and memory-saving. Multiple threads can concurrently perform read/write/delete operations up to 10M ops/s in mordern computer platform. It supports up to 2^32 hash items with O(1) performance for both of successful and unsuccessful search from the hash table.
 
@@ -7,7 +17,7 @@ A design description (in chinese) is posted here:
 https://blog.csdn.net/divfor/article/details/44316291
 
 # Usage
-Use below functions to create a hash handle that assosiates its arrays and memory pool, print statistics of it, or release it.
+Use below functions to create a hash handle that associates its arrays and memory pool, print statistics of it, or release it.
 ```c
 hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
 int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);

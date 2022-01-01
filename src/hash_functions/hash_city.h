@@ -45,20 +45,26 @@
 // of a+b is easily derived from the hashes of a and b.  This property
 // doesn't hold for any hash functions in this file.
 
+// $$ OWN ADDITIONS $$
+// in atomic_hash.c this header (hash_city.h) is included inside a local function
+// inside this function not all typedefs are used
+// => added ATTRIBUTE_UNUSED to suppress warnings
+// $$ OWN ADDITIONS $$
+
 #ifndef CITY_HASH_H_
 #define CITY_HASH_H_
 
 #include <stdlib.h>
 #include <stdint.h>
 
-typedef uint8_t uint8;
-typedef uint32_t uint32;
+typedef uint8_t uint8 __attribute__((__unused__));
+typedef uint32_t uint32 __attribute__((__unused__));
 typedef uint64_t uint64;
 
 typedef struct _uint128 uint128;
 struct _uint128 {
-  uint64 first;
-  uint64 second;
+    uint64 first;
+    uint64 second;
 };
 
 #define Uint128Low64(x) 	(x).first
