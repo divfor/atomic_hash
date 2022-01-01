@@ -63,14 +63,26 @@
 
 
 /* -- Available hash functions -- */
-#define CITY3HASH_128 1
-#define MD5HASH       2
+#define CITY3HASH_128   1
+#define MD5HASH         2
+// #define MPQ3HASH        3
+// #define NEWHASH         4
+// #define MURMUR3HASH_128 5
 
 
-#if FUNCTION == CITY3HASH_128 || FUNCTION == MD5HASH
-#define NCMP 2
+/* -- Types -- */
+#if FUNCTION == CITY3HASH_128 || FUNCTION == MD5HASH // || FUNCTION == MURMUR3HASH_128
+#  define NKEY 4
+#  define NCMP 2
+
 typedef uint64_t hvu;
 typedef struct { hvu x, y; } hv;
+// #elif FUNCTION == MPQ3HASH || FUNCTION == NEWHASH
+// #  define NKEY 3
+// #  define NCMP 3
+//
+// typedef uint32_t hvu;
+// typedef struct hv { hvu x, y, z; } hv_t;
 #endif
 
 #define shared __attribute__((aligned(64)))
@@ -137,10 +149,6 @@ struct hash_t {
 
 
 
-#if FUNCTION == CITY3HASH_128 || FUNCTION == MD5HASH
-#  define NKEY 4
-#endif
-
 #define NMHT 2
 #define NCLUSTER 4
 #define NSEAT (NMHT*NKEY*NCLUSTER)
@@ -171,6 +179,8 @@ struct hash_t {
           } while (0)
 
 
+
+/* -- Functions -- */
 static inline unsigned long nowms (void) {
     struct timeval tv;
     gettimeofday (&tv, NULL);
@@ -307,6 +317,7 @@ int init_htab (htab_t *ht, unsigned long num, double ratio) {
     return 0;
 }
 
+
 hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     const double collision = COLLISION; /* collision control, larger is better */
     hash_t *h;
@@ -328,14 +339,27 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
 #elif FUNCTION == CITY3HASH_128
 #  include "hash_functions/hash_city.h"
     h->hash_func = cityhash_128;
+// #elif FUNCTION == MPQ3HASH
+// #  include "hash_functions/hash_mpq.h"
+//   uint32_t ct[0x500];
+//   init_crypt_table (ct);
+//   h->hash_func = mpq3hash;
+// #elif FUNCTION == NEWHASH
+// #  include "hash_functions/hash_newhash.h"
+//   h->hash_func = newhash;
+// #elif FUNCTION == MURMUR3HASH_128
+// #  include "hash_functions/hash_murmur3.h"
+//   h->hash_func = MurmurHash3_x64_128;
 #else
 #  error "atomic_hash: No hash function has been selected!"
 #endif
+
     h->on_ttl = default_func_remove_node;
     h->on_del = default_func_remove_node;
     h->on_add = default_func_not_change_ttl;
     h->on_get = default_func_not_change_ttl;
     h->on_dup = default_func_reset_ttl;
+
     h->reset_expire = reset_ttl;
     h->nmht = NMHT;
     h->ncmp = NCMP;
