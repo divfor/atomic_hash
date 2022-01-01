@@ -3,10 +3,10 @@ set(CMAKE_BUILD_TYPE Debug)     # Ensure debug info and assert functions are bui
 
 
 # -- CMake options --
-option(WITH_TESTS "Build test (works only on GNU/Linux ??)" ON)
+option(WITH_BENCHMARK_TEST "Build benchmark test (works only on GNU/Linux ??)" OFF)
 
 
-if (WITH_TESTS)
+if (WITH_BENCHMARK_TEST)
     # -- Project(s) --
     add_executable(mthread_test
             utils/mtrand.c
