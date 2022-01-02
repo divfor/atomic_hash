@@ -1,7 +1,8 @@
 
 # -- Variables --
-set(MAP_SOURCE
-        atomic_hash.h
+set(MAP_HEADERS
+        atomic_hash.h)
+set(MAP_SOURCES
         atomic_hash.c)
 
 set(MAP_COMPILE_OPTIONS
@@ -12,43 +13,53 @@ set(MAP_LINK_LIBS
 
 
 # -- CMake options --
-set(FUNCTION "CITY3HASH_128" CACHE STRING "Function to be used")
-set(FUNCTION_VALUES "CITY3HASH_128;MD5HASH")
-set_property(CACHE FUNCTION PROPERTY STRINGS ${FUNCTION_VALUES})
+set(HASH_FUNCTION "CITY3HASH_128" CACHE STRING "Hash function to be used for hashmap (may depend on specific CPU arch or 3rd party libs)")
+set(HASH_FUNCTION_VALUES "CITY3HASH_128;MD5HASH")
+set_property(CACHE HASH_FUNCTION PROPERTY STRINGS ${HASH_FUNCTION_VALUES})
 
 
 # IMPORTANT: Must match macros in `atomic_hash.h`
-if (FUNCTION STREQUAL "CITY3HASH_128")
+if (HASH_FUNCTION STREQUAL "CITY3HASH_128")
     list(APPEND MAP_COMPILE_OPTIONS
-        -DFUNCTION=1
+        -DHASH_FUNCTION=1
         -march=native -msse4.2)
-    list(APPEND MAP_SOURCE
-        hash_functions/hash_city.h
+    list(APPEND MAP_HEADERS
+        hash_functions/hash_city.h)
+    list(APPEND MAP_SOURCES
         hash_functions/hash_city.c)
-elseif (FUNCTION STREQUAL "MD5HASH")
-    list(APPEND MAP_SOURCE
-        hash_functions/hash_md5.h
+
+elseif (HASH_FUNCTION STREQUAL "MD5HASH")
+    list(APPEND MAP_HEADERS
+        hash_functions/hash_md5.h)
+    list(APPEND MAP_SOURCES
         hash_functions/hash_md5.c)
     list(APPEND MAP_COMPILE_OPTIONS
-        -DFUNCTION=2)
+        -DHASH_FUNCTION=2)
     list(APPEND MAP_LINK_LIBS
         ssl
         crypto)
+
 else()
-    error("Invalid function")
+    error("Invalid hash function")
 endif()
 
 
 # -- "Project" --
-add_library(atomic_hash_object OBJECT ${MAP_SOURCE})
+add_library(atomic_hash_object OBJECT
+        ${MAP_HEADERS}
+        ${MAP_SOURCES})
 target_compile_options(atomic_hash_object PUBLIC ${MAP_COMPILE_OPTIONS})
 target_link_libraries(atomic_hash_object PRIVATE ${MAP_LINK_LIBS})
 target_include_directories(atomic_hash_object SYSTEM INTERFACE ${CMAKE_CURRENT_LIST_DIR})      # TODO: Revise (should be `include`able via <hashmap/header.h>)
 
-add_library(atomic_hash SHARED  ${MAP_SOURCE})
+add_library(atomic_hash SHARED
+        ${MAP_HEADERS}
+        ${MAP_SOURCES})
 target_compile_options(atomic_hash PUBLIC ${MAP_COMPILE_OPTIONS})
 target_link_libraries(atomic_hash PRIVATE ${MAP_LINK_LIBS})
 
-add_library(atomic_hash_static STATIC  ${MAP_SOURCE})
+add_library(atomic_hash_static STATIC
+        ${MAP_HEADERS}
+        ${MAP_SOURCES})
 target_compile_options(atomic_hash_static PUBLIC ${MAP_COMPILE_OPTIONS})
 target_link_libraries(atomic_hash_static PRIVATE ${MAP_LINK_LIBS})

@@ -71,13 +71,13 @@
 
 
 /* -- Types -- */
-#if FUNCTION == CITY3HASH_128 || FUNCTION == MD5HASH // || FUNCTION == MURMUR3HASH_128
+#if HASH_FUNCTION == CITY3HASH_128 || HASH_FUNCTION == MD5HASH // || HASH_FUNCTION == MURMUR3HASH_128
 #  define NKEY 4
 #  define NCMP 2
 
 typedef uint64_t hvu;
 typedef struct { hvu x, y; } hv;
-// #elif FUNCTION == MPQ3HASH || FUNCTION == NEWHASH
+// #elif HASH_FUNCTION == MPQ3HASH || HASH_FUNCTION == NEWHASH
 // #  define NKEY 3
 // #  define NCMP 3
 //
@@ -130,7 +130,7 @@ typedef struct {
 } htab_t;
 
 struct hash_t {
-/* hash function, here select cityhash_128 as default */
+/* hash function */
     shared void (*hash_func)(const void *key, size_t len, void *r);
 
 /* hook func to deal with user data in safe zone */
@@ -333,21 +333,21 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     memset (h, 0, sizeof (*h));
 
 
-#if FUNCTION == MD5HASH
+#if HASH_FUNCTION == MD5HASH
 #  include "hash_functions/hash_md5.h"
   h->hash_func = md5hash;
-#elif FUNCTION == CITY3HASH_128
+#elif HASH_FUNCTION == CITY3HASH_128
 #  include "hash_functions/hash_city.h"
     h->hash_func = cityhash_128;
-// #elif FUNCTION == MPQ3HASH
+// #elif HASH_FUNCTION == MPQ3HASH
 // #  include "hash_functions/hash_mpq.h"
 //   uint32_t ct[0x500];
 //   init_crypt_table (ct);
 //   h->hash_func = mpq3hash;
-// #elif FUNCTION == NEWHASH
+// #elif HASH_FUNCTION == NEWHASH
 // #  include "hash_functions/hash_newhash.h"
 //   h->hash_func = newhash;
-// #elif FUNCTION == MURMUR3HASH_128
+// #elif HASH_FUNCTION == MURMUR3HASH_128
 // #  include "hash_functions/hash_murmur3.h"
 //   h->hash_func = MurmurHash3_x64_128;
 #else

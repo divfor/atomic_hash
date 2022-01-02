@@ -24,7 +24,7 @@ if (WITH_BENCHMARK_TEST)
     set(TEST_DEMO_DATA_TAR "top-1m.csv.tar.gz")
     add_custom_command(
             TARGET mthread_test POST_BUILD
-            COMMENT "Copy demo test file and extract it"
+            COMMENT "Copy benchmark test file and extract it"
 
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${TEST_DEMO_DATA_SRC_DIR} ${TEST_DEMO_DATA_DEST_DIR}
             COMMAND ${CMAKE_COMMAND} -E chdir ${TEST_DEMO_DATA_DEST_DIR} tar xzf ${TEST_DEMO_DATA_TAR}
