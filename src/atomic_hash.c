@@ -23,8 +23,12 @@
 
 /*
  * - TODOs:
- *   1. allow hash functions to accept hash value as input instead of key that can reduce hash cacalulating.
- *   2. enable elastic memory pool for screnaios that run with huge number of hash nodes (approximate 3 million nodes / 100 MB)
+ *   1. Hashmap:
+ *     1.1. allow hash functions to accept hash value as input instead of key that can reduce hash cacalulating.
+ *     1.2. enable elastic memory pool for screnaios that run with huge number of hash nodes (approximate 3 million nodes / 100 MB)
+ *   2. CMake:
+ *     2.1. Integrate unimplemented hash functions
+ *     2.2. CMake install option
  *
  *
  * - Changelog (since fork):

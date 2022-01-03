@@ -9,6 +9,10 @@
 For detailed list, see *Changelog* in [src/atomic_hash.c](src/atomic_hash.c)
 
 
+## TODOs
+See *TODOs* in [src/atomic_hash.c](src/atomic_hash.c)
+
+
 ## Build
 ### Prerequisites
 * Installed cmake + ccmake (Note: ccmake is optional):
@@ -40,7 +44,7 @@ hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
 int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
 int atomic_hash_destroy (hash_t *h);
 ```
-The hash handle can be copied to any number of threads for calling below hash functions: 
+The hash handle can be copied to any number of threads for calling below hash functions:
 ```c
 int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook func_on_dup, void *out);
 int atomic_hash_del (hash_t *h, void *key, int key_len, hook func_on_del, void *out); //delete all matches
