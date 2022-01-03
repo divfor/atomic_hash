@@ -13,6 +13,10 @@ set(MAP_LINK_LIBS
 
 
 # -- CMake options --
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Default build type: Release" FORCE)
+endif()
+
 set(HASH_FUNCTION "CITY3HASH_128" CACHE STRING "Hash function to be used for hashmap (may depend on specific CPU arch or 3rd party libs)")
 set(HASH_FUNCTION_VALUES "CITY3HASH_128;MD5HASH")
 set_property(CACHE HASH_FUNCTION PROPERTY STRINGS ${HASH_FUNCTION_VALUES})

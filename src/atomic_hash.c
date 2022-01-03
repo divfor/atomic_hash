@@ -22,7 +22,12 @@
  */
 
 /*
- * Changelog:
+ * - TODOs:
+ *   1. allow hash functions to accept hash value as input instead of key that can reduce hash cacalulating.
+ *   2. enable elastic memory pool for screnaios that run with huge number of hash nodes (approximate 3 million nodes / 100 MB)
+ *
+ *
+ * - Changelog (since fork):
  *   - Added `PRINT_DEBUG_MSG` to some `printf`s to omit debug output in non-debug build
  *   - Added `static` keyword to all `inline`d functions (https://stackoverflow.com/a/54875926)
  *
