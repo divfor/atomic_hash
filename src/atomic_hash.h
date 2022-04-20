@@ -32,7 +32,7 @@
 
 
 /* -- Types -- */
-typedef struct hash_t hash_t;
+typedef struct hash hash_t;
 
 typedef int (*hook_t) (void *hash_data, void *rtn_data);
 
@@ -45,7 +45,7 @@ void atomic_hash_register_hooks(hash_t *h,
                                 hook_t cb_on_ttl, hook_t cb_on_add, hook_t cb_on_dup, hook_t cb_on_get, hook_t cb_on_del);
 
 int atomic_hash_destroy (hash_t *h);
-int atomic_hash_add (hash_t *h, const void *key, int key_len, void *user_data, int init_ttl, hook_t func_on_dup, void *out);
+int atomic_hash_add (hash_t *h, const void *key, int key_len, void *user_data, int init_ttl, hook_t cb_fct_dup, void *out);
 int atomic_hash_del (hash_t *h, const void *key, int key_len, hook_t func_on_del, void *out); //delete all matches
 int atomic_hash_get (hash_t *h, const void *key, int key_len, hook_t func_on_get, void *out); //get the first match
 int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);

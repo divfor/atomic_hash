@@ -25,28 +25,28 @@ Not like normal hash functions that return user data directly, atomic hash funct
 ```c
 typedef int (*hook_t)(void *hash_data, void *out)
 ```
-here `hash_data` will be copied from target hash node's `data` field by atomic hash functions (generally it is a pointer to link the user data), and `out` will be given by atomic hash function's caller. There are 5 function pointers (`on_ttl`, `on_del`, `on_add`, `on_get` and `on_dup`) to register hook functions. The hook function should obey below rules:
+here `hash_data` will be copied from target hash node's `data` field by atomic hash functions (generally it is a pointer to link the user data), and `out` will be given by atomic hash function's caller. There are 5 function pointers (`cb_on_ttl`, `cb_on_del`, `cb_on_add`, `cb_on_get` and `cb_on_dup`) to register hook functions. The hook function should obey below rules:
   1. must be non-blocking and essential actions only. too much execution time will drop performance remarkablly;
-  2. `on_ttl` and `on_del` should free user data and must return -1 (`HOOK_REMOVE_HASH_NODE`).
-  3. `on_get` and `on_dup` may return either -2 (`HOOK_SET_TTL_TO_DEFAULT`) or a positive number that indicates updating ttl;
-  4. `on_add` must return -3 (`HOOK_DONT_CHANGE_TTL`) as ttl will be set by `intital_ttl`;
+  2. `cb_on_ttl` and `cb_on_del` should free user data and must return -1 (`HOOK_REMOVE_HASH_NODE`).
+  3. `cb_on_get` and `cb_on_dup` may return either -2 (`HOOK_SET_TTL_TO_DEFAULT`) or a positive number that indicates updating ttl;
+  4. `cb_on_add` must return -3 (`HOOK_DONT_CHANGE_TTL`) as ttl will be set by `intital_ttl`;
 
 `atomic_hash_create` will initialize some built-in functions as default hook functions that only do value-copy for hash node's 'data' field and then return code. So you need to write your own hook functions to replace default ones if you want to free your user data's memeory or adjust ttl in the fly:
   ```c
-  h->on_ttl = your_own_on_ttl_hook_func;
-  h->on_add = your_own_on_add_hook_func;
+  h->cb_on_ttl = your_own_on_ttl_hook_func;
+  h->cb_on_add = your_own_on_add_hook_func;
   ...
   ```
-In the call time, instead of hook functions registered in `on_dup`/`on_get`/`on_del`, hash functions `atomic_hash_add`, `atomic_hash_get`, `atomic_hash_del` are able to use an alertative function as long as they obey above hook function rules. This will give flexibility to deal with different user data type in a same hash table.
+In the call time, instead of hook functions registered in `cb_on_dup`/`cb_on_get`/`cb_on_del`, hash functions `atomic_hash_add`, `atomic_hash_get`, `atomic_hash_del` are able to use an alertative function as long as they obey above hook function rules. This will give flexibility to deal with different user data type in a same hash table.
 
 ### About TTL
 TTL (in milliseconds) is designed to enable timer for hash nodes. Set `reset_ttl` to 0 to disable this feature so that all hash items never expire. If `reset_ttl` is set to >0, you still can set `init_ttl` to 0 to mark specified hash items that never expire.
 
-`reset_ttl`: `atomic_hash_create` uses it to set `hash_node->expire`. each successful lookup by `atomic_hash_add` or `atomic_hash_get` may reset target hash node's `hash_node->expire` to (now + `reset_ttl`), per your `on_dup` / `on_get` hook functions;
+`reset_ttl`: `atomic_hash_create` uses it to set `hash_node->expire`. each successful lookup by `atomic_hash_add` or `atomic_hash_get` may reset target hash node's `hash_node->expire` to (now + `reset_ttl`), per your `cb_on_dup` / `cb_on_get` hook functions;
 
 `init_ttl`：`atomic_hash_add` uses it to set `hash_node->expire` to (now + `init_ttl`). If `init_ttl` == 0, hash_node will never expires as it will NOT be reset by `reset_ttl`.
 
-`hash_node->expire`: hash node's 'expire' field. If `expire` == 0, this hash node will never expire; If `expire` > 0, this hash node will become expired when current time is larger than expire, but no removal action immediately applies on it. However, since it's expired, it may be removed by any of hash add/get/del calls that traverses it (in another words, no active cleanup thread to clear expired item). So your must free user data's memory in your own `hash_handle->on_ttl` hook function!!!
+`hash_node->expire`: hash node's 'expire' field. If `expire` == 0, this hash node will never expire; If `expire` > 0, this hash node will become expired when current time is larger than expire, but no removal action immediately applies on it. However, since it's expired, it may be removed by any of hash add/get/del calls that traverses it (in another words, no active cleanup thread to clear expired item). So your must free user data's memory in your own `hash_handle->cb_on_ttl` hook function!!!
 
 
 ## Build
