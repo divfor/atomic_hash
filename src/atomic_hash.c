@@ -152,11 +152,11 @@ struct hash_t {
     SHARED void (*hash_func)(const void *key, size_t len, void *r);
 
 /* hook func to deal w/ user data in safe zone */
-    SHARED hook on_ttl,
-                on_add,
-                on_dup,
-                on_get,
-                on_del;
+    SHARED hook_t on_ttl,
+                  on_add,
+                  on_dup,
+                  on_get,
+                  on_del;
     SHARED volatile cas_t freelist; /* free hash node list */
     SHARED htab_t ht[3]; /* ht[2] for array [MINTAB] */
     SHARED hstats_t stats;
@@ -220,8 +220,6 @@ static mem_pool_t *create_mem_pool (unsigned int max_nodes, unsigned int node_si
                  pwr2_node_size,
                  pwr2_total_size,
                  pwr2_block_size;
-    mem_pool_t *pmp;
-
 #define PW2_MAX_BLK_PTR 9   /* hard code one 4K-page for max 512 block pointers */
 #define PW2_MIN_BLK_SIZ 12  /* 2^12 = 4K page size */
 
@@ -235,6 +233,7 @@ static mem_pool_t *create_mem_pool (unsigned int max_nodes, unsigned int node_si
         return NULL;
     }
 
+    mem_pool_t *pmp;
     if (posix_memalign ((void **) (&pmp), 64, sizeof (*pmp)))
         return NULL;
     memset (pmp, 0, sizeof (*pmp));
@@ -259,7 +258,7 @@ static mem_pool_t *create_mem_pool (unsigned int max_nodes, unsigned int node_si
     return NULL;
 }
 
-static int destroy_mem_pool (mem_pool_t * pmp) {
+static int destroy_mem_pool (mem_pool_t *pmp) {
     if (!pmp)
         return -1;
 
@@ -530,21 +529,21 @@ int atomic_hash_destroy (hash_t *h) {
 }
 
 void atomic_hash_register_hooks(hash_t *h,
-                                hook on_ttl, hook on_add, hook on_dup, hook on_get, hook on_del) {
-    if (on_ttl) {
-        h->on_ttl = on_ttl;
+                                hook_t cb_on_ttl, hook_t cb_on_add, hook_t cb_on_dup, hook_t cb_on_get, hook_t cb_on_del) {
+    if (cb_on_ttl) {
+        h->on_ttl = cb_on_ttl;
     }
-    if (on_add) {
-        h->on_add = on_add;
+    if (cb_on_add) {
+        h->on_add = cb_on_add;
     }
-    if (on_dup) {
-        h->on_dup = on_dup;
+    if (cb_on_dup) {
+        h->on_dup = cb_on_dup;
     }
-    if (on_get) {
-        h->on_get = on_get;
+    if (cb_on_get) {
+        h->on_get = cb_on_get;
     }
-    if (on_del) {
-        h->on_del = on_del;
+    if (cb_on_del) {
+        h->on_del = cb_on_del;
     }
 }
 
@@ -594,7 +593,7 @@ static inline int likely_equal (hv w, hv v) {
 }
 
 /* only called in atomic_hash_get */
-static inline int try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn) {
+static inline int try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, hook_t cbf, void *rtn) {
     HOLD_BUCKET_OTHERWISE_RETURN_0 (p->v, v);
     if (*seat != mi) {
         UNHOLD_BUCKET (p->v, v);
@@ -620,7 +619,7 @@ static inline int try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int id
 }
 
 /* only called in atomic_hash_add */
-static inline int try_dup (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn) {
+static inline int try_dup (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, hook_t cbf, void *rtn) {
     HOLD_BUCKET_OTHERWISE_RETURN_0 (p->v, v);
     if (*seat != mi) {
         UNHOLD_BUCKET (p->v, v);
@@ -673,7 +672,7 @@ static inline int try_add (hash_t *h, node_t *p, nid *seat, nid mi, int idx, voi
 }
 
 /* only called in atomic_hash_del */
-static inline int try_del (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn) {
+static inline int try_del (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx, hook_t cbf, void *rtn) {
     HOLD_BUCKET_OTHERWISE_RETURN_0 (p->v, v);
     if (*seat != mi || !CAS (seat, mi, NNULL)) {
         UNHOLD_BUCKET (p->v, v);
@@ -774,7 +773,7 @@ static inline int valid_ttl (hash_t *h, unsigned long now, node_t *p, nid *seat,
 
 #define idx(j) (j < (NCLUSTER*NKEY) ? 0 : 1)
 int atomic_hash_add (hash_t *h, const void *kwd, int len, void *data,
-                     int init_ttl, hook cbf_dup, void *arg) {
+                     int init_ttl, hook_t cbf_dup, void *arg) {
     register unsigned int i, j;
     register nid mi;
     register node_t *p;
@@ -835,7 +834,7 @@ hash_value_exists:
 }
 
 
-int atomic_hash_get (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
+int atomic_hash_get (hash_t *h, const void *kwd, int len, hook_t cbf, void *arg) {
     MEMWORD union { hv v; nid d[NKEY]; } t;
     if (len > 0)
         h->hash_func (kwd, len, &t);
@@ -870,7 +869,7 @@ int atomic_hash_get (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
     return -1;
 }
 
-int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
+int atomic_hash_del (hash_t *h, const void *kwd, int len, hook_t cbf, void *arg) {
     MEMWORD union { hv v; nid d[NKEY]; } t;
     if (len > 0)
         h->hash_func (kwd, len, &t);

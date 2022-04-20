@@ -17,13 +17,13 @@ int atomic_hash_destroy (hash_t *h);
 ```
 The hash handle can be copied to any number of threads for calling below hash functions:
 ```c
-int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook func_on_dup, void *out);
-int atomic_hash_del (hash_t *h, void *key, int key_len, hook func_on_del, void *out); //delete all matches
-int atomic_hash_get (hash_t *h, void *key, int key_len, hook func_on_get, void *out); //get the first match
+int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook_t func_on_dup, void *out);
+int atomic_hash_del (hash_t *h, void *key, int key_len, hook_t func_on_del, void *out); //delete all matches
+int atomic_hash_get (hash_t *h, void *key, int key_len, hook_t func_on_get, void *out); //get the first match
 ```
 Not like normal hash functions that return user data directly, atomic hash functions return status code -- 0 for successful operation and non-zero for unsuccessful operation. Instead, atomic hash functions call hook functions to deal with user data once they find target hash node. The hook functions should be defined as following format:
 ```c
-typedef int (*hook)(void *hash_data, void *out)
+typedef int (*hook_t)(void *hash_data, void *out)
 ```
 here `hash_data` will be copied from target hash node's `data` field by atomic hash functions (generally it is a pointer to link the user data), and `out` will be given by atomic hash function's caller. There are 5 function pointers (`on_ttl`, `on_del`, `on_add`, `on_get` and `on_dup`) to register hook functions. The hook function should obey below rules:
   1. must be non-blocking and essential actions only. too much execution time will drop performance remarkablly;
