@@ -38,26 +38,26 @@ unsigned long now (void) {
 }
 
 int cb_dup (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
-  return PLEASE_SET_TTL_TO_DEFAULT;
+  return HOOK_SET_TTL_TO_DEFAULT;
 }
 
 int cb_add (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
-  return PLEASE_DO_NOT_CHANGE_TTL;
+  return HOOK_DONT_CHANGE_TTL;
 }
 
 int cb_get (void *data, void *arg) {
   *((void **)arg) = strdup(data);
-  return PLEASE_DO_NOT_CHANGE_TTL;
+  return HOOK_DONT_CHANGE_TTL;
 }
 
 int cb_del (void *data, __attribute__((unused))void *arg) {
   free (data);
-  return PLEASE_REMOVE_HASH_NODE;
+  return HOOK_REMOVE_HASH_NODE;
 }
 
 int cb_ttl (void *data, __attribute__((unused))void *arg) {
   free (data);
-  return PLEASE_REMOVE_HASH_NODE;
+  return HOOK_REMOVE_HASH_NODE;
 }
 
 int cb_random_loop (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
