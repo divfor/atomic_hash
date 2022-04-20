@@ -17,75 +17,82 @@
 #include "atomic_hash_debug.h"
 
 
+/* -- Consts -- */
 //#define EXITTIME 20000
 #define NT 16
 
 // #define time_after(a,b) ((b) > (a) || (long)(b) - (long)(a) < 0)
 // #define time_before(a,b)  time_after(b,a)
-#define TTL_ON_ADD 0
+#define TTL_ON_ADD    0
 #define TTL_ON_CREATE 0
 
+
+/* -- Types -- */
 typedef struct teststr {
   char *s;
   uint64_t hv[2];
   int len;
 } teststr_t;
 
-unsigned long now (void) {
+
+/* -- Functions -- */
+static unsigned long gettime_in_ms (void) {
   struct timeval tv;
   gettimeofday (&tv, NULL);
   return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
 }
 
-int cb_dup (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
+/* Hooks */
+static int cb_dup (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
   return HOOK_SET_TTL_TO_DEFAULT;
 }
 
-int cb_add (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
+static int cb_add (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
   return HOOK_DONT_CHANGE_TTL;
 }
 
-int cb_get (void *data, void *arg) {
+static int cb_get (void *data, void *arg) {
   *((void **)arg) = strdup(data);
   return HOOK_DONT_CHANGE_TTL;
 }
 
-int cb_del (void *data, __attribute__((unused))void *arg) {
+static int cb_del (void *data, __attribute__((unused))void *arg) {
   free (data);
   return HOOK_REMOVE_HASH_NODE;
 }
 
-int cb_ttl (void *data, __attribute__((unused))void *arg) {
+static int cb_ttl (void *data, __attribute__((unused))void *arg) {
   free (data);
   return HOOK_REMOVE_HASH_NODE;
 }
 
-int cb_random_loop (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
+static int cb_random_loop (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
   unsigned long i, j = 0;
   //struct timeval tv;  gettimeofday (&tv, NULL);  usleep (tv.tv_usec % 1000);
   for (i = mt_rand () % 10000; i > 0; i--) j += i;
   return j % 2;
 }
 
-void *thread_function (void *phash) {
-  hash_t *h = (hash_t *) phash;
-  teststr_t *p;
+
+/* - Test fct -*/
+static void *routine_test (void *arg) {
+  hash_t *h = (hash_t *) arg;
   teststr_t * const a = (teststr_t*)atomic_hash_debug_get_teststr(h);
-  unsigned long action, rnd, num_strings = atomic_hash_debug_get_teststr_num(h);
+  unsigned long num_strings = atomic_hash_debug_get_teststr_num(h);
 #ifdef EXITTIME
-  unsigned long t0 = now ();
+  unsigned long t0 = gettime_in_ms ();
 #endif
   int tid = syscall (SYS_gettid);
-  char *str = NULL, *buf = NULL;
+  char *buf = NULL;
   int ret;
   while (1) {
       buf = NULL;
-      rnd = mt_rand();
-      p = &a[rnd % num_strings];
+      unsigned long rnd = mt_rand();
+      teststr_t *p = &a[rnd % num_strings];
       //p = &a[__sync_fetch_and_add (&h->testidx, 1) % num_strings];
-      action = (rnd * tid) % 100;
+      unsigned long action = (rnd * tid) % 100;
       if (action < 90) {
-          str = strdup (p->s);
+          char* str = strdup (p->s);
           ret = atomic_hash_add (h, p->s, p->len, str, TTL_ON_ADD, NULL, &buf);
           //ret = atomic_hash_add (h, p->s, p->len, str, action*90, NULL, &buf);
           //ret = atomic_hash_add (h, p->hv, 0, str, action*90, NULL, &buf);
@@ -107,7 +114,7 @@ void *thread_function (void *phash) {
            }
         }
 #ifdef EXITTIME
-      if (now () >= t0 + EXITTIME)
+      if (gettime_in_ms () >= t0 + EXITTIME)
   break;
 #endif
     }
@@ -115,22 +122,23 @@ void *thread_function (void *phash) {
     return NULL;
 }
 
-void * thread_prints (void *phash) {
-  hash_t *h = (hash_t *) phash;
+static void * routine_stats (void *arg) {
+  hash_t *h = (hash_t *) arg;
 //  printf ("pid[%ld]: started thread_printf() \n", syscall (SYS_gettid));
-  unsigned long t0 = now ();
+  unsigned long t0 = gettime_in_ms();
   while (1) {
       sleep (5);
-      atomic_hash_stats (h, now () - t0);
+      atomic_hash_stats (h, gettime_in_ms() - t0);
 #ifdef EXITTIME
-      if (now () >= t0 + EXITTIME)
+      if (gettime_in_ms () >= t0 + EXITTIME)
   return NULL;
 #endif
     }
   return NULL;
 }
 
-int set_cpus (int num_cpus) {
+
+static int set_cpus (int num_cpus) {
   cpu_set_t *cpusetp;
   size_t size;
   int cpu;
@@ -155,14 +163,11 @@ int set_cpus (int num_cpus) {
 
 
 int main (int argc, char **argv) {
-  unsigned long num_strings = 0, nlines = 0, sl = 0, i = 0;
-  char sbuf[1024];
-  teststr_t *a = NULL;
   FILE *fp = NULL;
-  hash_t *ptmp, *phash = NULL;
   int cpu_num = sysconf(_SC_NPROCESSORS_ONLN);
-  unsigned int thread_num;
 
+  unsigned long nlines = 0;
+  char sbuf[1024];
   if (argc >= 3)
     nlines = atoi (argv[2]);
   if (nlines <= 0) {
@@ -173,27 +178,31 @@ int main (int argc, char **argv) {
       for (nlines = 0; fgets (sbuf, 1023, fp); nlines++);
       fclose (fp);
     }
-  printf ("Plan to read %lu test lines from file '%s'.\n", nlines, argv[1]);
-  if (!(a = malloc (nlines * sizeof (*a))))
+  printf ("About to read %lu test lines from file '%s'.\n", nlines, argv[1]);
+  teststr_t *a = malloc (nlines * sizeof (*a));
+  if (!a)
     return -1;
 
 
   printf ("Now reading ... ");
   if (!(fp = fopen (argv[1], "r")))
     return -1;
-  num_strings = 0;
-  ptmp = phash = atomic_hash_create (100, TTL_ON_CREATE);
+
+  unsigned long num_strings = 0;
+  hash_t *phash = atomic_hash_create (100, TTL_ON_CREATE),
+         *ptmp = phash;
   while (num_strings < nlines && fgets (sbuf, 1023, fp)) {
-      if ((sl = strlen (sbuf)) < 1)
+      unsigned long sl = strlen (sbuf);
+      if (sl  < 1)
         continue;
       sbuf[sl] = '\0'; /* strip newline char */
       if ((a[num_strings].s = strdup (sbuf)) == NULL) {
          printf ("exiting due to no memory after load %lu lines...\n", num_strings);
-         for (i = 0; i < num_strings; i++)
+         for (unsigned long i = 0; i < num_strings; i++)
            free (a[i].s);
          free (a);
          return -1;
-       }
+      }
       a[num_strings].len = strlen(a[num_strings].s);
       void (*hash_func)(const void *key, size_t len, void *r) = atomic_hash_debug_get_hash_func(ptmp);
       hash_func (a[num_strings].s, a[num_strings].len, a[num_strings].hv);
@@ -205,28 +214,31 @@ int main (int argc, char **argv) {
 
 
   phash = atomic_hash_create (num_strings, TTL_ON_CREATE);
+  if (!phash)
+        return -1;
   atomic_hash_register_hooks(phash,
                              cb_ttl, cb_add, cb_dup, cb_get, cb_del);
-  if (!phash)
-    return -1;
   atomic_hash_debug_set_teststr(phash, a);
   atomic_hash_debug_set_teststr_num(phash, num_strings);
-  mt_srand(now());
+  mt_srand(gettime_in_ms());
 
+  unsigned int thread_num;
   thread_num = (NT <= 8 ? NT : set_cpus (cpu_num));
   thread_num = (NT > 16 ? NT : thread_num);
+
   pthread_t pid[thread_num + 1];
-  if (pthread_create (&pid[thread_num], NULL, thread_prints, phash) < 0)
+  if (pthread_create(&pid[thread_num], NULL, routine_stats, phash) < 0)
     return -1;
   printf ("Creating %u pthreads ... ", thread_num);
-  for (i = 0; i < thread_num; i++)
-    if (pthread_create (&pid[i], NULL, thread_function, phash) < 0)
+  for (unsigned long i = 0; i < thread_num; i++)
+    if (pthread_create(&pid[i], NULL, routine_test, phash) < 0)
       return -1;
   puts ("done. Now waiting...");
-  for (i = 0; i <= thread_num; i++)
+  for (unsigned long i = 0; i <= thread_num; i++)
     pthread_join (pid[i], NULL);
+
   puts ("All threads closed.");
-  for (i = 0; i < num_strings; i++)
+  for (unsigned long i = 0; i < num_strings; i++)
     free (a[i].s);
   free (a);
 

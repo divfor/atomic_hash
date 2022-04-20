@@ -913,7 +913,7 @@ int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
 /* -------------------- -------------------- -------------------- -------------------- -------------------- */
 
 
-/* - Debug/Test functions - */
+/* - Test functions - */
 void (*atomic_hash_debug_get_hash_func(hash_t *h))(const void *key, size_t len, void *r) {
     return h->hash_func;
 }
