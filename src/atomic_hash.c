@@ -30,24 +30,9 @@
  *     2.1. Integrate unimplemented hash functions
  *     2.2. CMake install option
  *
- *
- * - Changelog (since fork):
- *   - Added `PRINT_DEBUG_MSG` to some `printf`s to omit debug output in non-debug build
- *   - Added `static` keyword to all `inline`d functions (https://stackoverflow.com/a/54875926)
- *
- *   - Fixed compiler warnings:
- *      - unused variables removed
- *      - uninitialized variables initialized to 0
- *      - solved comparison of integer with different signedness
- *
- *   - Compiler error when no hash function was "selected"
+ * - Revise:
  *   - Replace `__asm__("pause")` w/ `usleep(1)` + `#include <unistd.h>` (for more portable code)
- *
- *   - Removed not working hash functions + add support for "selecting" function
- *
- *   - Opaque data type
  */
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -123,7 +108,10 @@ typedef struct {
 } hstats_t;
 
 // typedef struct {
-//     unsigned long xadd, xget, xdel, nexp;
+//     unsigned long xadd,
+//                   xget,
+//                   xdel,
+//                   nexp;
 // } hc_t; /* 64-bytes cache line */
 
 typedef struct {
@@ -380,50 +368,50 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     }
 
 
-    hash_t *h;
-    if (posix_memalign ((void **) (&h), 64, sizeof (*h)))
+    hash_t *hmap;
+    if (posix_memalign ((void **) (&hmap), 64, sizeof (*hmap)))
         return NULL;
-    memset (h, 0, sizeof (*h));
+    memset (hmap, 0, sizeof (*hmap));
 
 #if HASH_FUNCTION == MD5HASH
 #  include "hash_functions/hash_md5.h"
-    h->hash_func = md5hash;
+    hmap->hash_func = md5hash;
 #elif HASH_FUNCTION == CITY3HASH_128
 #  include "hash_functions/hash_city.h"
-    h->hash_func = cityhash_128;
+    hmap->hash_func = cityhash_128;
 // #elif HASH_FUNCTION == MPQ3HASH
 // #  include "hash_functions/hash_mpq.h"
 //   uint32_t ct[0x500];
 //   init_crypt_table (ct);
-//   h->hash_func = mpq3hash;
+//   hmap->hash_func = mpq3hash;
 // #elif HASH_FUNCTION == NEWHASH
 // #  include "hash_functions/hash_newhash.h"
-//   h->hash_func = newhash;
+//   hmap->hash_func = newhash;
 // #elif HASH_FUNCTION == MURMUR3HASH_128
 // #  include "hash_functions/hash_murmur3.h"
-//   h->hash_func = MurmurHash3_x64_128;
+//   hmap->hash_func = MurmurHash3_x64_128;
 #else
 #  error "atomic_hash: No hash function has been selected!"
 #endif
 
-    h->cb_on_ttl =       default_cb_remove_node;
-    h->cb_on_del =       default_cb_remove_node;
-    h->cb_on_add =       default_cb_ttl_no_change;
-    h->cb_on_get =       default_cb_ttl_no_change;
-    h->cb_on_dup =       default_cb_reset_ttl;
+    hmap->cb_on_ttl =       default_cb_remove_node;
+    hmap->cb_on_del =       default_cb_remove_node;
+    hmap->cb_on_add =       default_cb_ttl_no_change;
+    hmap->cb_on_get =       default_cb_ttl_no_change;
+    hmap->cb_on_dup =       default_cb_reset_ttl;
 
-    h->reset_expire =    reset_ttl;
-    h->nmht =            NMHT;
-    h->ncmp =            NCMP;
-    h->nkey =            NKEY;   /* uint32_t # of hash function's output */
-    h->npos =            h->nkey * NCLUSTER; /* pos # in one hash table */
-    h->nseat =           h->npos * h->nmht; /* pos # in all hash tables */
-    h->freelist.cas.mi = NNULL;
+    hmap->reset_expire =    reset_ttl;
+    hmap->nmht =            NMHT;
+    hmap->ncmp =            NCMP;
+    hmap->nkey =            NKEY;   /* uint32_t # of hash function's output */
+    hmap->npos =            hmap->nkey * NCLUSTER; /* pos # in one hash table */
+    hmap->nseat =           hmap->npos * hmap->nmht; /* pos # in all hash tables */
+    hmap->freelist.cas.mi = NNULL;
 
 
-    htab_t *ht1 = &h->ht[0],            /* bucket array 1, 2 and collision array */
-           *ht2 = &h->ht[1],
-           *at1 = &h->ht[NMHT];
+    htab_t *ht1 = &hmap->ht[0],            /* bucket array 1, 2 and collision array */
+           *ht2 = &hmap->ht[1],
+           *at1 = &hmap->ht[NMHT];
 
 /* n1 -> n2 -> 1/tuning
  * nb1 = n1 * r1, r1 = ((n1+2)/tuning/K^2)^(K^2 - 1)
@@ -431,7 +419,7 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
  */
     PRINT_DEBUG_MSG("init bucket array 1:\n");
     const double collision = COLLISION; /* collision control, larger is better */
-    double K = h->npos + 1;
+    double K = hmap->npos + 1;
     unsigned long n1 = max_nodes;
     double r1 = pow ((n1 * collision / (K * K)), (1.0 / (K * K - 1)));
     if (init_htab (ht1, n1, r1) < 0)
@@ -447,35 +435,35 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     if (init_htab (at1, 0, collision) < 0)
         goto calloc_exit;
 
-    h->mp = create_mem_pool (max_nodes, sizeof (node_t));
-//  h->mp = old_create_mem_pool (ht1->nb + ht2->nb + at1->nb, sizeof (node_t), max_blocks);
-    PRINT_DEBUG_MSG("shift=%u; mask=%u\n", h->mp->shift, h->mp->mask);
-    PRINT_DEBUG_MSG("mem_blocks:\t%u/%u, %ux%u bytes, %u bytes per block\n", h->mp->curr_blocks, h->mp->max_blocks,
-            h->mp->blk_node_num, h->mp->node_size, h->mp->blk_size);
-    if (!h->mp)
+    hmap->mp = create_mem_pool (max_nodes, sizeof (node_t));
+//  hmap->mp = old_create_mem_pool (ht1->nb + ht2->nb + at1->nb, sizeof (node_t), max_blocks);
+    PRINT_DEBUG_MSG("shift=%u; mask=%u\n", hmap->mp->shift, hmap->mp->mask);
+    PRINT_DEBUG_MSG("mem_blocks:\t%u/%u, %ux%u bytes, %u bytes per block\n", hmap->mp->curr_blocks, hmap->mp->max_blocks,
+                    hmap->mp->blk_node_num, hmap->mp->node_size, hmap->mp->blk_size);
+    if (!hmap->mp)
         goto calloc_exit;
 
-    h->stats.max_nodes = h->mp->max_blocks * h->mp->blk_node_num;
-    h->stats.mem_htabs = ((ht1->nb + ht2->nb) * sizeof (nid_t)) >> 10;
-    h->stats.mem_nodes = (h->stats.max_nodes * h->mp->node_size) >> 10;
-    return h;
+    hmap->stats.max_nodes = hmap->mp->max_blocks * hmap->mp->blk_node_num;
+    hmap->stats.mem_htabs = ((ht1->nb + ht2->nb) * sizeof (nid_t)) >> 10;
+    hmap->stats.mem_nodes = (hmap->stats.max_nodes * hmap->mp->node_size) >> 10;
+    return hmap;
 
 
 calloc_exit:
-    for (unsigned long j = 0; j < h->nmht; j++)
-        if (h->ht[j].b)
-            free (h->ht[j].b);
-    destroy_mem_pool (h->mp);
-    free (h);
+    for (unsigned long j = 0; j < hmap->nmht; j++)
+        if (hmap->ht[j].b)
+            free (hmap->ht[j].b);
+    destroy_mem_pool (hmap->mp);
+    free (hmap);
 
     return NULL;
 }
 
-int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds) {
-    const hstats_t *t = &h->stats;
-    const htab_t *ht1 = &h->ht[0],
-                 *ht2 = &h->ht[1];
-    mem_pool_t *m = h->mp;
+int atomic_hash_stats (hash_t *hmap, unsigned long escaped_milliseconds) {
+    const hstats_t *t = &hmap->stats;
+    const htab_t *ht1 = &hmap->ht[0],
+                 *ht2 = &hmap->ht[1];
+    mem_pool_t *m = hmap->mp;
     double d =         1024.0,
            blk_in_kB = m->blk_size / d,
            mem =       m->curr_blocks * blk_in_kB;
@@ -505,7 +493,7 @@ int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds) {
                   ndup = 0,
                   nget = 0,
                   ndel = 0;
-    for (unsigned long j = 0; j <= NMHT && (p = &h->ht[j]); j++) {
+    for (unsigned long j = 0; j <= NMHT && (p = &hmap->ht[j]); j++) {
         ncur += p->ncur;
         nadd += p->nadd;
         ndup += p->ndup;
@@ -530,70 +518,70 @@ int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds) {
     return 0;
 }
 
-int atomic_hash_destroy (hash_t *h) {
-    if (!h)
+int atomic_hash_destroy (hash_t *hmap) {
+    if (!hmap)
         return -1;
 
-    for (unsigned int j = 0; j < h->nmht; j++)
-        free (h->ht[j].b);
-    destroy_mem_pool (h->mp);
-    free (h);
+    for (unsigned int j = 0; j < hmap->nmht; j++)
+        free (hmap->ht[j].b);
+    destroy_mem_pool (hmap->mp);
+    free (hmap);
 
     return 0;
 }
 
-void atomic_hash_register_hooks(hash_t *h,
+void atomic_hash_register_hooks(hash_t *hmap,
                                 hook_t cb_on_ttl, hook_t cb_on_add, hook_t cb_on_dup, hook_t cb_on_get, hook_t cb_on_del) {
     if (cb_on_ttl) {
-        h->cb_on_ttl = cb_on_ttl;
+        hmap->cb_on_ttl = cb_on_ttl;
     }
     if (cb_on_add) {
-        h->cb_on_add = cb_on_add;
+        hmap->cb_on_add = cb_on_add;
     }
     if (cb_on_dup) {
-        h->cb_on_dup = cb_on_dup;
+        hmap->cb_on_dup = cb_on_dup;
     }
     if (cb_on_get) {
-        h->cb_on_get = cb_on_get;
+        hmap->cb_on_get = cb_on_get;
     }
     if (cb_on_del) {
-        h->cb_on_del = cb_on_del;
+        hmap->cb_on_del = cb_on_del;
     }
 }
 
 
 /* -------------------- -------------------- -------------------- -------------------- -------------------- */
-static inline nid_t new_node (hash_t *h) {
+static inline nid_t new_node (hash_t *hmap) {
     MEMWORD cas_t n,
                   m;
-    while (h->freelist.cas.mi != NNULL || new_mem_block (h->mp, &h->freelist)) {
-        n.all = h->freelist.all;
+    while (hmap->freelist.cas.mi != NNULL || new_mem_block (hmap->mp, &hmap->freelist)) {
+        n.all = hmap->freelist.all;
         if (n.cas.mi == NNULL)
             continue;
 
-        m.cas.mi = ((cas_t *) (I2P (h->mp, node_t, n.cas.mi)))->cas.mi;
+        m.cas.mi = ((cas_t *) (I2P (hmap->mp, node_t, n.cas.mi)))->cas.mi;
         m.cas.rfn = n.cas.rfn + 1;
 
-        if (CAS (&h->freelist.all, n.all, m.all))
+        if (CAS (&hmap->freelist.all, n.all, m.all))
             return n.cas.mi;
     }
 
-    ADD1 (h->stats.add_nomem);
+    ADD1 (hmap->stats.add_nomem);
     return NNULL;
 }
 
-static inline void free_node (hash_t *h, nid_t mi) {
-    cas_t *p = (cas_t *) (I2P (h->mp, node_t, mi));
+static inline void free_node (hash_t *hmap, nid_t mi) {
+    cas_t *p = (cas_t *) (I2P (hmap->mp, node_t, mi));
     p->cas.rfn = 0;
 
     MEMWORD cas_t n,
                   m;
     m.cas.mi = mi;
     do {
-        n.all = h->freelist.all;
+        n.all = hmap->freelist.all;
         m.cas.rfn = n.cas.rfn + 1;
         p->cas.mi = n.cas.mi;
-    } while (!CAS (&h->freelist.all, n.all, m.all));
+    } while (!CAS (&hmap->freelist.all, n.all, m.all));
 }
 
 static inline void set_hash_node (node_t *p, hv_t v, void *data, unsigned long expire) {
