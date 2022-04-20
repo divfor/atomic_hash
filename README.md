@@ -27,9 +27,9 @@ typedef int (*hook)(void *hash_data, void *out)
 ```
 here `hash_data` will be copied from target hash node's `data` field by atomic hash functions (generally it is a pointer to link the user data), and `out` will be given by atomic hash function's caller. There are 5 function pointers (`on_ttl`, `on_del`, `on_add`, `on_get` and `on_dup`) to register hook functions. The hook function should obey below rules:
   1. must be non-blocking and essential actions only. too much execution time will drop performance remarkablly;
-  2. `on_ttl` and `on_del` should free user data and must return -1 (`PLEASE_REMOVE_HASH_NODE`).
-  3. `on_get` and `on_dup` may return either -2 (`PLEASE_SET_TTL_TO_DEFAULT`) or a positive number that indicates updating ttl;
-  4. `on_add` must return -3 (`PLEASE_DO_NOT_CHANGE_TTL`) as ttl will be set by `intital_ttl`;
+  2. `on_ttl` and `on_del` should free user data and must return -1 (`HOOK_REMOVE_HASH_NODE`).
+  3. `on_get` and `on_dup` may return either -2 (`HOOK_SET_TTL_TO_DEFAULT`) or a positive number that indicates updating ttl;
+  4. `on_add` must return -3 (`HOOK_DONT_CHANGE_TTL`) as ttl will be set by `intital_ttl`;
 
 `atomic_hash_create` will initialize some built-in functions as default hook functions that only do value-copy for hash node's 'data' field and then return code. So you need to write your own hook functions to replace default ones if you want to free your user data's memeory or adjust ttl in the fly:
   ```c

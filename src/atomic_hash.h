@@ -20,19 +20,19 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
-
 #ifndef ATOMIC_HASH_H
 #define ATOMIC_HASH_H
 
+/* -- Consts -- */
 /* callback function idx */
-#define PLEASE_REMOVE_HASH_NODE    -1
-#define PLEASE_SET_TTL_TO_DEFAULT  -2
-#define PLEASE_DO_NOT_CHANGE_TTL   -3
-#define PLEASE_SET_TTL_TO(n)       (n)
+#define HOOK_REMOVE_HASH_NODE   -1
+#define HOOK_SET_TTL_TO_DEFAULT -2
+#define HOOK_DONT_CHANGE_TTL    -3
+#define HOOK_SET_TTL_TO(n)      (n)
 
 
+/* -- Types -- */
 typedef struct hash_t hash_t;
-
 
 // typedef int (*callback)(void *hash_data, void *caller_data);
 typedef int (*hook) (void *hash_data, void *rtn_data);
