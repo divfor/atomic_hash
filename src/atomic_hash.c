@@ -94,7 +94,7 @@ typedef struct { hvu x, y; } hv;
 // typedef struct hv { hvu x, y, z; } hv_t;
 #endif
 
-#define shared __attribute__((aligned(64)))
+#define SHARED __attribute__((aligned(64)))
 
 typedef uint32_t nid;
 typedef struct {
@@ -116,9 +116,9 @@ typedef struct {
 
 typedef struct {
     void **ba;
-    shared nid mask,
-               shift; /* used for i2p() only */
-    shared nid max_blocks,
+    SHARED nid mask,
+               shift; /* used for I2P() only */
+    SHARED nid max_blocks,
                blk_node_num,
                node_size,
                blk_size;
@@ -149,53 +149,52 @@ typedef struct {
 
 struct hash_t {
 /* hash function */
-    shared void (*hash_func)(const void *key, size_t len, void *r);
+    SHARED void (*hash_func)(const void *key, size_t len, void *r);
 
 /* hook func to deal w/ user data in safe zone */
-    shared hook on_ttl,
+    SHARED hook on_ttl,
                 on_add,
                 on_dup,
                 on_get,
                 on_del;
-    shared volatile cas_t freelist; /* free hash node list */
-    shared htab_t ht[3]; /* ht[2] for array [MINTAB] */
-    shared hstats_t stats;
-    shared void **hp;
-    shared mem_pool_t *mp;
-    shared unsigned long reset_expire; /* if > 0, reset node->expire */
-    shared unsigned long nmht,
+    SHARED volatile cas_t freelist; /* free hash node list */
+    SHARED htab_t ht[3]; /* ht[2] for array [MINTAB] */
+    SHARED hstats_t stats;
+    SHARED void **hp;
+    SHARED mem_pool_t *mp;
+    SHARED unsigned long reset_expire; /* if > 0, reset node->expire */
+    SHARED unsigned long nmht,
                          ncmp;
-    shared unsigned long nkey,
+    SHARED unsigned long nkey,
                          npos,
                          nseat; /* nseat = 2*npos = 4*nkey */
 
-    shared void *teststr;
-    shared unsigned long testidx,
-                         teststr_num;
+    SHARED void *teststr;
+    SHARED unsigned long teststr_num;
 };
 
 
 /* -- 'Aliases' / 'Fct-like' macros -- */
-#define memword                 __attribute__((aligned(sizeof(void *))))
+#define MEMWORD                 __attribute__((aligned(sizeof(void *))))
 
-#define atomic_add1(v)          __sync_fetch_and_add(&(v), 1)
-#define atomic_sub1(v)          __sync_fetch_and_sub(&(v), 1)
-#define add1(v)                 __sync_fetch_and_add(&(v), 1)
-#define cas(dst, old, new)      __sync_bool_compare_and_swap((dst), (old), (new))
+#define ATOMIC_ADD1(v)          __sync_fetch_and_add(&(v), 1)
+#define ATOMIC_SUB1(v)          __sync_fetch_and_sub(&(v), 1)
+#define ADD1(v)                 __sync_fetch_and_add(&(v), 1)
+#define CAS(dst, old, new)      __sync_bool_compare_and_swap((dst), (old), (new))
 
-#define ip(mp, type, i)         (((type *)(mp->ba[(i) >> mp->shift]))[(i) & mp->mask])
-#define i2p(mp, type, i)        (i == NNULL ? NULL : &(ip(mp, type, i)))
-//#define unhold_bucket(hv, v)    do { if ((hv).y && !(hv).x) (hv).x = (v).x; } while(0)
-#define unhold_bucket(hv, v)    while ((hv).y && !cas (&(hv).x, 0, (v).x))
-#define hold_bucket_otherwise_return_0(hv, v) do { unsigned long __l = MAXSPIN; \
-          while (!cas(&(hv).x, (v).x, 0)) { /* when CAS fails */ \
+#define IP(mp, type, i)         (((type *)(mp->ba[(i) >> mp->shift]))[(i) & mp->mask])
+#define I2P(mp, type, i)        (i == NNULL ? NULL : &(IP(mp, type, i)))
+//#define UNHOLD_BUCKET(hv, v)    do { if ((hv).y && !(hv).x) (hv).x = (v).x; } while(0)
+#define UNHOLD_BUCKET(hv, v)    while ((hv).y && !CAS (&(hv).x, 0, (v).x))
+#define HOLD_BUCKET_OTHERWISE_RETURN_0(hv, v) do { unsigned long __l = MAXSPIN; \
+          while (!CAS(&(hv).x, (v).x, 0)) { /* when CAS fails */ \
             if ((hv).x != (v).x) return 0; /* already released or reused */\
             while ((hv).x == 0) { /* wait for unhold */ \
               if ((hv).y == 0) return 0; /* no unhold but released */ \
-              if (--__l == 0) { add1 (h->stats.escapes); return 0; } /* give up */ \
+              if (--__l == 0) { ADD1 (h->stats.escapes); return 0; } /* give up */ \
               if (__l & 0x0f) usleep(1); else sched_yield(); /* original: __asm__("pause") */ \
           }} \
-          if ((hv).y != (v).y || (hv).y == 0) { unhold_bucket (hv, v); return 0; } \
+          if ((hv).y != (v).y || (hv).y == 0) { UNHOLD_BUCKET (hv, v); return 0; } \
           } while (0)
 
 /* - Debugging macros - */
@@ -286,8 +285,8 @@ static inline nid *new_mem_block (mem_pool_t *pmp, volatile cas_t *recv_queue) {
 
     nid i;
     for (i = pmp->curr_blocks; i < pmp->max_blocks; i++)
-        if (cas (&pmp->ba[i], NULL, p)) {
-            atomic_add1 (pmp->curr_blocks);
+        if (CAS (&pmp->ba[i], NULL, p)) {
+            ATOMIC_ADD1 (pmp->curr_blocks);
             break;
         }
 
@@ -302,17 +301,17 @@ static inline nid *new_mem_block (mem_pool_t *pmp, volatile cas_t *recv_queue) {
     for (i = 0; i < m; i++)
         *(nid *) ((char *)p + i * sz) = head + i + 1;
 
-    memword cas_t *pn = (cas_t *) ((char *)p + m * sz);
+    MEMWORD cas_t *pn = (cas_t *) ((char *)p + m * sz);
     pn->cas.mi =  NNULL;
     pn->cas.rfn = 0;
-    memword cas_t n,
+    MEMWORD cas_t n,
                   x;
     x.cas.mi = head;
     do {
         n.all = recv_queue->all;
         pn->cas.mi = n.cas.mi;
         x.cas.rfn = n.cas.rfn + 1;
-    } while (!cas (&recv_queue->all, n.all, x.all));
+    } while (!CAS (&recv_queue->all, n.all, x.all));
 
     return (nid *) ((char *)p + m * sz);
 }
@@ -552,36 +551,36 @@ void atomic_hash_register_hooks(hash_t *h,
 
 /* -------------------- -------------------- -------------------- -------------------- -------------------- */
 static inline nid new_node (hash_t *h) {
-    memword cas_t n,
+    MEMWORD cas_t n,
                   m;
     while (h->freelist.cas.mi != NNULL || new_mem_block (h->mp, &h->freelist)) {
         n.all = h->freelist.all;
         if (n.cas.mi == NNULL)
             continue;
 
-        m.cas.mi = ((cas_t *) (i2p (h->mp, node_t, n.cas.mi)))->cas.mi;
+        m.cas.mi = ((cas_t *) (I2P (h->mp, node_t, n.cas.mi)))->cas.mi;
         m.cas.rfn = n.cas.rfn + 1;
 
-        if (cas (&h->freelist.all, n.all, m.all))
+        if (CAS (&h->freelist.all, n.all, m.all))
             return n.cas.mi;
     }
 
-    add1 (h->stats.add_nomem);
+    ADD1 (h->stats.add_nomem);
     return NNULL;
 }
 
 static inline void free_node (hash_t *h, nid mi) {
-    cas_t *p = (cas_t *) (i2p (h->mp, node_t, mi));
+    cas_t *p = (cas_t *) (I2P (h->mp, node_t, mi));
     p->cas.rfn = 0;
 
-    memword cas_t n,
+    MEMWORD cas_t n,
                   m;
     m.cas.mi = mi;
     do {
         n.all = h->freelist.all;
         m.cas.rfn = n.cas.rfn + 1;
         p->cas.mi = n.cas.mi;
-    } while (!cas (&h->freelist.all, n.all, m.all));
+    } while (!CAS (&h->freelist.all, n.all, m.all));
 }
 
 static inline void set_hash_node (node_t *p, hv v, void *data, unsigned long expire) {
@@ -596,18 +595,18 @@ static inline int likely_equal (hv w, hv v) {
 
 /* only called in atomic_hash_get */
 static inline int try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn) {
-    hold_bucket_otherwise_return_0 (p->v, v);
+    HOLD_BUCKET_OTHERWISE_RETURN_0 (p->v, v);
     if (*seat != mi) {
-        unhold_bucket (p->v, v);
+        UNHOLD_BUCKET (p->v, v);
         return 0;
     }
 
     int result = cbf ? cbf (p->data, rtn) : h->on_get (p->data, rtn);
     if (result == HOOK_REMOVE_HASH_NODE) {
-        if (cas (seat, mi, NNULL))
-            atomic_sub1 (h->ht[idx].ncur);
+        if (CAS (seat, mi, NNULL))
+            ATOMIC_SUB1 (h->ht[idx].ncur);
         memset (p, 0, sizeof (*p));
-        add1 (h->ht[idx].nget);
+        ADD1 (h->ht[idx].nget);
         free_node (h, mi);
         return 1;
     }
@@ -615,25 +614,25 @@ static inline int try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int id
         result = h->reset_expire;
     if (p->expire > 0 && result > 0)
         p->expire = result + gettime_in_ms();
-    unhold_bucket (p->v, v);
-    add1 (h->ht[idx].nget);
+    UNHOLD_BUCKET (p->v, v);
+    ADD1 (h->ht[idx].nget);
     return 1;
 }
 
 /* only called in atomic_hash_add */
 static inline int try_dup (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn) {
-    hold_bucket_otherwise_return_0 (p->v, v);
+    HOLD_BUCKET_OTHERWISE_RETURN_0 (p->v, v);
     if (*seat != mi) {
-        unhold_bucket (p->v, v);
+        UNHOLD_BUCKET (p->v, v);
         return 0;
     }
 
     int result = cbf ? cbf (p->data, rtn) : h->on_dup (p->data, rtn);
     if (result == HOOK_REMOVE_HASH_NODE) {
-        if (cas (seat, mi, NNULL))
-            atomic_sub1 (h->ht[idx].ncur);
+        if (CAS (seat, mi, NNULL))
+            ATOMIC_SUB1 (h->ht[idx].ncur);
         memset (p, 0, sizeof (*p));
-        add1 (h->ht[idx].ndup);
+        ADD1 (h->ht[idx].ndup);
         free_node (h, mi);
         return 1;
     }
@@ -641,8 +640,8 @@ static inline int try_dup (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int id
         result = h->reset_expire;
     if (p->expire > 0 && result > 0)
         p->expire = result + gettime_in_ms();
-    unhold_bucket (p->v, v);
-    add1 (h->ht[idx].ndup);
+    UNHOLD_BUCKET (p->v, v);
+    ADD1 (h->ht[idx].ndup);
     return 1;
 }
 
@@ -650,16 +649,16 @@ static inline int try_dup (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int id
 static inline int try_add (hash_t *h, node_t *p, nid *seat, nid mi, int idx, void *rtn) {
     hvu x = p->v.x;
     p->v.x = 0;
-    if (!cas (seat, NNULL, mi)) {
+    if (!CAS (seat, NNULL, mi)) {
         p->v.x = x;
         return 0; /* other thread wins, caller to retry other seats */
     }
 
-    atomic_add1 (h->ht[idx].ncur);
+    ATOMIC_ADD1 (h->ht[idx].ncur);
     int result = h->on_add (p->data, rtn);
     if (result == HOOK_REMOVE_HASH_NODE) {
-        if (cas (seat, mi, NNULL))
-            atomic_sub1 (h->ht[idx].ncur);
+        if (CAS (seat, mi, NNULL))
+            ATOMIC_SUB1 (h->ht[idx].ncur);
         memset (p, 0, sizeof (*p));
         free_node (h, mi);
         return 1; /* abort adding this node */
@@ -669,22 +668,22 @@ static inline int try_add (hash_t *h, node_t *p, nid *seat, nid mi, int idx, voi
     if (p->expire > 0 && result > 0)
         p->expire = result + gettime_in_ms();
     p->v.x = x;
-    add1 (h->ht[idx].nadd);
+    ADD1 (h->ht[idx].nadd);
     return 1;
 }
 
 /* only called in atomic_hash_del */
 static inline int try_del (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn) {
-    hold_bucket_otherwise_return_0 (p->v, v);
-    if (*seat != mi || !cas (seat, mi, NNULL)) {
-        unhold_bucket (p->v, v);
+    HOLD_BUCKET_OTHERWISE_RETURN_0 (p->v, v);
+    if (*seat != mi || !CAS (seat, mi, NNULL)) {
+        UNHOLD_BUCKET (p->v, v);
         return 0;
     }
 
-    atomic_sub1 (h->ht[idx].ncur);
+    ATOMIC_SUB1 (h->ht[idx].ncur);
     void *user_data = p->data;
     memset (p, 0, sizeof (*p));
-    add1 (h->ht[idx].ndel);
+    ADD1 (h->ht[idx].ndel);
     free_node (h, mi);
     if (cbf)
         cbf (user_data, rtn);
@@ -705,26 +704,26 @@ static inline int valid_ttl (hash_t *h, unsigned long now, node_t *p, nid *seat,
     if (v.x == 0 || v.y == 0)
         return 1;
 
-    hold_bucket_otherwise_return_0 (p->v, v);
+    HOLD_BUCKET_OTHERWISE_RETURN_0 (p->v, v);
     /* re-enter valid state, skip to call try_action */
     if (p->expire == 0 || p->expire > now) {
-        unhold_bucket (p->v, v);
+        UNHOLD_BUCKET (p->v, v);
         return 1;
     }
 
     /* expired,  now remove it */
-    if (*seat != mi || !cas (seat, mi, NNULL)) {
+    if (*seat != mi || !CAS (seat, mi, NNULL)) {
         /* failed to remove. let others do it in the future, skip and go next pos */
-        unhold_bucket (p->v, v);
+        UNHOLD_BUCKET (p->v, v);
         return 0;
     }
 
-    atomic_sub1 (h->ht[idx].ncur);
+    ATOMIC_SUB1 (h->ht[idx].ncur);
     void *user_data = p->data;
     memset (p, 0, sizeof (*p));
-    add1 (h->stats.expires);
+    ADD1 (h->stats.expires);
     /* return this hash node for caller re-use */
-    /* strict version: if (!node_rtn || !cas(node_rtn, NNULL, mi)) */
+    /* strict version: if (!node_rtn || !CAS(node_rtn, NNULL, mi)) */
     if (node_rtn && *node_rtn == NNULL)
         *node_rtn = mi;
     else
@@ -779,8 +778,8 @@ int atomic_hash_add (hash_t *h, const void *kwd, int len, void *data,
     register unsigned int i, j;
     register nid mi;
     register node_t *p;
-    memword nid *a[NSEAT];
-    memword union { hv v; nid d[NKEY]; } t;
+    MEMWORD nid *a[NSEAT];
+    MEMWORD union { hv v; nid d[NKEY]; } t;
     nid ni = NNULL;
     unsigned long now = gettime_in_ms();
 
@@ -794,14 +793,14 @@ int atomic_hash_add (hash_t *h, const void *kwd, int len, void *data,
     collect_hash_pos (t.d, a);
 
     for (j = 0; j < NSEAT; j++)
-        if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
+        if ((mi = *a[j]) != NNULL && (p = I2P (h->mp, node_t, mi)))
             if (valid_ttl (h, now, p, a[j], mi, idx (j), &ni, NULL))
                 if (likely_equal (p->v, t.v))
                     if (try_dup (h, t.v, p, a[j], mi, idx (j), cbf_dup, arg))
                         goto hash_value_exists;
 
     for (i = h->ht[NMHT].ncur, j = 0; i > 0 && j < MINTAB; j++)
-        if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && i--)
+        if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = I2P (h->mp, node_t, mi)) && i--)
             if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, &ni, NULL))
                 if (likely_equal (p->v, t.v))
                     if (try_dup (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, cbf_dup, arg))
@@ -810,7 +809,7 @@ int atomic_hash_add (hash_t *h, const void *kwd, int len, void *data,
     if (ni == NNULL && (ni = new_node (h)) == NNULL)
         return -2;  /* hash node exhausted */
 
-    p = i2p (h->mp, node_t, ni);
+    p = I2P (h->mp, node_t, ni);
     set_hash_node (p, t.v, data, (init_ttl > 0 ? init_ttl + now : 0));
 
     for (j = 0; j < NSEAT; j++)
@@ -826,7 +825,7 @@ int atomic_hash_add (hash_t *h, const void *kwd, int len, void *data,
 
     memset (p, 0, sizeof (*p));
     free_node (h, ni);
-    add1 (h->stats.add_nosit);
+    ADD1 (h->stats.add_nosit);
     return -1; /* add but fail */
 
 hash_value_exists:
@@ -837,7 +836,7 @@ hash_value_exists:
 
 
 int atomic_hash_get (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
-    memword union { hv v; nid d[NKEY]; } t;
+    MEMWORD union { hv v; nid d[NKEY]; } t;
     if (len > 0)
         h->hash_func (kwd, len, &t);
     else if (len == 0)
@@ -845,7 +844,7 @@ int atomic_hash_get (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
     else
         return -3; /* key length not defined */
 
-    memword nid *a[NSEAT];
+    MEMWORD nid *a[NSEAT];
     register unsigned int i,
                           j;
     collect_hash_pos (t.d, a);
@@ -854,25 +853,25 @@ int atomic_hash_get (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
     register node_t *p;
     unsigned long now = gettime_in_ms();
     for (j = 0; j < NSEAT; j++)
-        if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
+        if ((mi = *a[j]) != NNULL && (p = I2P (h->mp, node_t, mi)))
             if (valid_ttl (h, now, p, a[j], mi, idx (j), NULL, NULL))
                 if (likely_equal (p->v, t.v))
                     if (try_get (h, t.v, p, a[j], mi, idx (j), cbf, arg))
                         return 0;
 
     for (j = i = 0; i < h->ht[NMHT].ncur && j < MINTAB; j++)
-        if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && ++i)
+        if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = I2P (h->mp, node_t, mi)) && ++i)
             if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, NULL, NULL))
                 if (likely_equal (p->v, t.v))
                     if (try_get (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, cbf, arg))
                         return 0;
 
-    add1 (h->stats.get_nohit);
+    ADD1 (h->stats.get_nohit);
     return -1;
 }
 
 int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
-    memword union { hv v; nid d[NKEY]; } t;
+    MEMWORD union { hv v; nid d[NKEY]; } t;
     if (len > 0)
         h->hash_func (kwd, len, &t);
     else if (len == 0)
@@ -882,7 +881,7 @@ int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
 
     register unsigned int i,
                           j;
-    memword nid *a[NSEAT];
+    MEMWORD nid *a[NSEAT];
     collect_hash_pos (t.d, a);
 
     register nid mi;
@@ -890,7 +889,7 @@ int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
     unsigned long now = gettime_in_ms();
     i = 0; /* delete all matches */
     for (j = 0; j < NSEAT; j++)
-        if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
+        if ((mi = *a[j]) != NNULL && (p = I2P (h->mp, node_t, mi)))
             if (valid_ttl (h, now, p, a[j], mi, idx (j), NULL, NULL))
                 if (likely_equal (p->v, t.v))
                     if (try_del (h, t.v, p, a[j], mi, idx (j), cbf, arg))
@@ -898,7 +897,7 @@ int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
 
     if (h->ht[NMHT].ncur > 0)
         for (j = 0; j < MINTAB; j++)
-            if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
+            if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = I2P (h->mp, node_t, mi)))
                 if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, NULL, NULL))
                     if (likely_equal (p->v, t.v))
                         if (try_del (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, cbf, arg))
@@ -907,7 +906,7 @@ int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
     if (i > 0)
         return 0;
 
-    add1 (h->stats.del_nohit);
+    ADD1 (h->stats.del_nohit);
     return -1;
 }
 /* -------------------- -------------------- -------------------- -------------------- -------------------- */
