@@ -1,34 +1,5 @@
 # atomic_hash
 
-## Changelog (since fork)
-* Opaque data type (hooks are now registered via `atomic_hash_register_hooks`)
-* CMake support
-  * Selection of to be used hash function (currently only HashCity & MD5)
-* Resolved compiler warnings
-
-For detailed list, see *Changelog* in [src/atomic_hash.c](src/atomic_hash.c)
-
-
-## TODOs
-See *TODOs* in [src/atomic_hash.c](src/atomic_hash.c)
-
-
-## Build
-### Prerequisites
-* Installed cmake + ccmake (Note: ccmake is optional):
-  * On Ubuntu: `sudo snap install cmake --classic` + `sudo apt install -y cmake-curses-gui`
-
-### Requirements based on chosen cmake options
-* Option `WITH_STACK_UNWINDING`: *MD5* requires `libssl-dev`
-
-### Out-of-source build
-1. `mkdir build && cd build`
-2. `ccmake -DCMAKE_BUILD_TYPE=Release ..` &rarr; press `c` &rarr; press `c` &rarr; press `g`
-3. `cmake --build .`
-    * Library (static & shared) will be in `build/src`
-
-
----
 ## Summary
 This is a hash table designed with high performance, lock-free and memory-saving. Multiple threads can concurrently perform read/write/delete operations up to 10M ops/s in mordern computer platform. It supports up to 2^32 hash items with O(1) performance for both of successful and unsuccessful search from the hash table.
 
@@ -68,7 +39,7 @@ here `hash_data` will be copied from target hash node's `data` field by atomic h
   ```
 In the call time, instead of hook functions registered in `on_dup`/`on_get`/`on_del`, hash functions `atomic_hash_add`, `atomic_hash_get`, `atomic_hash_del` are able to use an alertative function as long as they obey above hook function rules. This will give flexibility to deal with different user data type in a same hash table.
 
-## About TTL
+### About TTL
 TTL (in milliseconds) is designed to enable timer for hash nodes. Set `reset_ttl` to 0 to disable this feature so that all hash items never expire. If `reset_ttl` is set to >0, you still can set `init_ttl` to 0 to mark specified hash items that never expire.
 
 `reset_ttl`: `atomic_hash_create` uses it to set `hash_node->expire`. each successful lookup by `atomic_hash_add` or `atomic_hash_get` may reset target hash node's `hash_node->expire` to (now + `reset_ttl`), per your `on_dup` / `on_get` hook functions;
@@ -76,3 +47,18 @@ TTL (in milliseconds) is designed to enable timer for hash nodes. Set `reset_ttl
 `init_ttl`：`atomic_hash_add` uses it to set `hash_node->expire` to (now + `init_ttl`). If `init_ttl` == 0, hash_node will never expires as it will NOT be reset by `reset_ttl`.
 
 `hash_node->expire`: hash node's 'expire' field. If `expire` == 0, this hash node will never expire; If `expire` > 0, this hash node will become expired when current time is larger than expire, but no removal action immediately applies on it. However, since it's expired, it may be removed by any of hash add/get/del calls that traverses it (in another words, no active cleanup thread to clear expired item). So your must free user data's memory in your own `hash_handle->on_ttl` hook function!!!
+
+
+## Build
+### Prerequisites
+* Installed pkg-config, cmake & ccmake (Note: ccmake is optional):
+    * Debian/Ubuntu: `sudo apt install -y pkg-config cmake cmake-curses-gui`
+    * macOS: `brew install pkg-config cmake`
+* Requirements based on chosen cmake options:
+  * `HASH_FUNCTION`: `MD5HASH` requires OpenSSL (package `libssl-dev` for Debian/Ubuntu)
+
+### Out-of-source build
+1. `mkdir build && cd build`
+2. `ccmake -DCMAKE_BUILD_TYPE=Release ..` &rarr; press `c` &rarr; press `c` &rarr; press `g`
+3. `cmake --build .`
+    * Library (static & shared) will be in `build/src`
