@@ -151,7 +151,7 @@ struct hash_t {
 /* hash function */
     shared void (*hash_func)(const void *key, size_t len, void *r);
 
-/* hook func to deal with user data in safe zone */
+/* hook func to deal w/ user data in safe zone */
     shared hook on_ttl,
                 on_add,
                 on_dup,
@@ -227,7 +227,7 @@ static mem_pool_t *create_mem_pool (unsigned int max_nodes, unsigned int node_si
 #define PW2_MIN_BLK_SIZ 12  /* 2^12 = 4K page size */
 
     for (pwr2_max_nodes = 0; (1u << pwr2_max_nodes) < max_nodes; pwr2_max_nodes++);
-    if (pwr2_max_nodes == 0 || pwr2_max_nodes > 32) /* auto resize for exceeption, use 1MB as mem index and 1MB block size*/
+    if (pwr2_max_nodes == 0 || pwr2_max_nodes > 32) /* auto resize for exception, use 1MB as mem index and 1MB block size*/
         pwr2_max_nodes = 32;
 
     for (pwr2_node_size = 0; (1u << pwr2_node_size) < node_size; pwr2_node_size++);
@@ -303,11 +303,11 @@ static inline nid *new_mem_block (mem_pool_t *pmp, volatile cas_t *recv_queue) {
         *(nid *) ((char *)p + i * sz) = head + i + 1;
 
     memword cas_t *pn = (cas_t *) ((char *)p + m * sz);
-    pn->cas.mi = NNULL;
+    pn->cas.mi =  NNULL;
     pn->cas.rfn = 0;
-    memword cas_t n, x;
+    memword cas_t n,
+                  x;
     x.cas.mi = head;
-
     do {
         n.all = recv_queue->all;
         pn->cas.mi = n.cas.mi;
@@ -408,14 +408,15 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     h->nseat =           h->npos * h->nmht; /* pos # in all hash tables */
     h->freelist.cas.mi = NNULL;
 
-    htab_t *ht1 = &h->ht[0],
+
+    htab_t *ht1 = &h->ht[0],            /* bucket array 1, 2 and collision array */
            *ht2 = &h->ht[1],
-           *at1 = &h->ht[NMHT];  /* bucket array 1, 2 and collision array */
+           *at1 = &h->ht[NMHT];
 
 /* n1 -> n2 -> 1/tuning
  * nb1 = n1 * r1, r1 = ((n1+2)/tuning/K^2)^(K^2 - 1)
  * nb2 = n2 * r2 == nb1 / K == ((n2+2)/tuning/K))^(K - 1)
-*/
+ */
     PRINT_DEBUG_MSG("init bucket array 1:\n");
     const double collision = COLLISION; /* collision control, larger is better */
     double K = h->npos + 1;
@@ -460,14 +461,13 @@ calloc_exit:
 
 int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds) {
     const hstats_t *t = &h->stats;
-    const htab_t *ht1 = &h->ht[0], *ht2 = &h->ht[1];
-    htab_t *p;
+    const htab_t *ht1 = &h->ht[0],
+                 *ht2 = &h->ht[1];
     mem_pool_t *m = h->mp;
-    unsigned long j, nadd = 0, ndup = 0, nget = 0, ndel = 0, ncur = 0, op = 0;
-    double blk_in_kB, mem, d = 1024.0;
-    char *b = "    ";
-    blk_in_kB = m->blk_size / d;
-    mem = m->curr_blocks * blk_in_kB;
+    double d =         1024.0,
+           blk_in_kB = m->blk_size / d,
+           mem =       m->curr_blocks * blk_in_kB;
+    char *log_delim = "    ";
 
     printf("mem=%.2f, blk_in_kB=%.2f, curr_block=%u, blk_nod_num=%u, node_size=%u\n",
             mem, blk_in_kB, m->curr_blocks, m->blk_node_num, m->node_size);
@@ -485,9 +485,15 @@ int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds) {
             ht1->nb * 1.0 / ht1->n, ht2->nb * 1.0 / ht2->n,
             ht1->n * 100.0 / (ht1->nb + ht2->nb));
     printf ("---------------------------------------------------------------------------\n");
-    printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", b, b, b, b, b, b, b, b);
+    printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", log_delim, log_delim, log_delim, log_delim, log_delim, log_delim, log_delim, log_delim);
 
-    for (j = 0; j <= NMHT && (p = &h->ht[j]); j++) {
+    htab_t *p;
+    unsigned long ncur = 0,
+                  nadd = 0,
+                  ndup = 0,
+                  nget = 0,
+                  ndel = 0;
+    for (unsigned long j = 0; j <= NMHT && (p = &h->ht[j]); j++) {
         ncur += p->ncur;
         nadd += p->nadd;
         ndup += p->ndup;
@@ -495,11 +501,11 @@ int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds) {
         ndel += p->ndel;
         printf ("%-4lu%-14lu%-14lu%-14lu%-14lu%-14lu\n", j, p->ncur, p->nadd, p->ndup, p->nget, p->ndel);
     }
-    op = ncur + nadd + ndup + nget + ndel + t->get_nohit + t->del_nohit + t->add_nosit + t->add_nomem + t->escapes;
+    unsigned long op = ncur + nadd + ndup + nget + ndel + t->get_nohit + t->del_nohit + t->add_nosit + t->add_nomem + t->escapes;
 
     printf ("sum %-14lu%-14lu%-14lu%-14lu%-14lu\n", ncur, nadd, ndup, nget, ndel);
     printf ("---------------------------------------------------------------------------\n");
-    printf ("del_nohit %sget_nohit %sadd_nosit %sadd_nomem %sexpires %sescapes\n", b, b, b, b, b);
+    printf ("del_nohit %sget_nohit %sadd_nosit %sadd_nomem %sexpires %sescapes\n", log_delim, log_delim, log_delim, log_delim, log_delim);
     printf ("%-14lu%-14lu%-14lu%-14lu%-12lu%-12lu\n", t->del_nohit,
             t->get_nohit, t->add_nosit, t->add_nomem, t->expires, t->escapes);
     printf ("---------------------------------------------------------------------------\n");
@@ -520,6 +526,7 @@ int atomic_hash_destroy (hash_t *h) {
         free (h->ht[j].b);
     destroy_mem_pool (h->mp);
     free (h);
+
     return 0;
 }
 
@@ -545,7 +552,8 @@ void atomic_hash_register_hooks(hash_t *h,
 
 /* -------------------- -------------------- -------------------- -------------------- -------------------- */
 static inline nid new_node (hash_t *h) {
-    memword cas_t n, m;
+    memword cas_t n,
+                  m;
     while (h->freelist.cas.mi != NNULL || new_mem_block (h->mp, &h->freelist)) {
         n.all = h->freelist.all;
         if (n.cas.mi == NNULL)
@@ -563,9 +571,11 @@ static inline nid new_node (hash_t *h) {
 }
 
 static inline void free_node (hash_t *h, nid mi) {
-    memword cas_t n, m;
     cas_t *p = (cas_t *) (i2p (h->mp, node_t, mi));
     p->cas.rfn = 0;
+
+    memword cas_t n,
+                  m;
     m.cas.mi = mi;
     do {
         n.all = h->freelist.all;
@@ -636,7 +646,7 @@ static inline int try_dup (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int id
     return 1;
 }
 
-/* only called in atomic_hash_add */
+/* only called in `atomic_hash_add` */
 static inline int try_add (hash_t *h, node_t *p, nid *seat, nid mi, int idx, void *rtn) {
     hvu x = p->v.x;
     p->v.x = 0;
@@ -819,7 +829,7 @@ int atomic_hash_add (hash_t *h, const void *kwd, int len, void *data,
     add1 (h->stats.add_nosit);
     return -1; /* add but fail */
 
-    hash_value_exists:
+hash_value_exists:
     if (ni != NNULL)
         free_node (h, ni);
     return 1; /* hash value exists */
@@ -827,13 +837,7 @@ int atomic_hash_add (hash_t *h, const void *kwd, int len, void *data,
 
 
 int atomic_hash_get (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
-    register unsigned int i, j;
-    register nid mi;
-    register node_t *p;
-    memword nid *a[NSEAT];
     memword union { hv v; nid d[NKEY]; } t;
-    unsigned long now = gettime_in_ms();
-
     if (len > 0)
         h->hash_func (kwd, len, &t);
     else if (len == 0)
@@ -841,8 +845,14 @@ int atomic_hash_get (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
     else
         return -3; /* key length not defined */
 
+    memword nid *a[NSEAT];
+    register unsigned int i,
+                          j;
     collect_hash_pos (t.d, a);
 
+    register nid mi;
+    register node_t *p;
+    unsigned long now = gettime_in_ms();
     for (j = 0; j < NSEAT; j++)
         if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
             if (valid_ttl (h, now, p, a[j], mi, idx (j), NULL, NULL))
@@ -862,13 +872,7 @@ int atomic_hash_get (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
 }
 
 int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
-    register unsigned int i, j;
-    register nid mi;
-    register node_t *p;
-    memword nid *a[NSEAT];
     memword union { hv v; nid d[NKEY]; } t;
-    unsigned long now = gettime_in_ms();
-
     if (len > 0)
         h->hash_func (kwd, len, &t);
     else if (len == 0)
@@ -876,8 +880,14 @@ int atomic_hash_del (hash_t *h, const void *kwd, int len, hook cbf, void *arg) {
     else
         return -3; /* key length not defined */
 
+    register unsigned int i,
+                          j;
+    memword nid *a[NSEAT];
     collect_hash_pos (t.d, a);
 
+    register nid mi;
+    register node_t *p;
+    unsigned long now = gettime_in_ms();
     i = 0; /* delete all matches */
     for (j = 0; j < NSEAT; j++)
         if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
