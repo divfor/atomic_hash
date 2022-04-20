@@ -37,7 +37,6 @@ typedef struct hash_t hash_t;
 typedef int (*hook_t) (void *hash_data, void *rtn_data);
 
 
-
 /* -- Function prototypes -- */
 /* For documentation, see README.md */
 hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl);
