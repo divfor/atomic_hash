@@ -93,19 +93,6 @@ typedef struct {
 
 typedef uint32_t nid_t;
 
-typedef struct {
-    unsigned long expires;
-    unsigned long escapes;
-    unsigned long add_nomem;
-    unsigned long add_nosit;
-    unsigned long del_nohit;
-    unsigned long get_nohit;
-    unsigned long mem_htabs;
-    unsigned long mem_nodes;
-    unsigned long max_nodes;
-    unsigned long key_collided;
-} hstats_t;
-
 // typedef struct {
 //     unsigned long xadd,
 //                   xget,
@@ -124,20 +111,6 @@ typedef struct {
     volatile nid_t cur_blocks;
 } mem_pool_t;
 
-typedef union {
-    struct {
-        nid_t mi,
-              rfn;
-    } cas;
-    uint64_t all;
-} cas_t;
-
-typedef struct {
-    volatile hv_t v;
-    unsigned long expiry_in_ms; /* expire in ms # of `gettimeofday`(2), 0 = never */
-    void *data;
-} node_t;
-
 typedef struct {
     nid_t *b;             /* hash tab (int array as memory index) */
     unsigned long ncur,
@@ -148,6 +121,27 @@ typedef struct {
                   nget,
                   ndel;
 } htab_t;
+
+typedef union {
+    struct {
+        nid_t mi,
+                rfn;
+    } cas;
+    uint64_t all;
+} cas_t;
+
+typedef struct {
+    unsigned long expires;
+    unsigned long escapes;
+    unsigned long add_nomem;
+    unsigned long add_nosit;
+    unsigned long del_nohit;
+    unsigned long get_nohit;
+    unsigned long mem_htabs;
+    unsigned long mem_nodes;
+    unsigned long max_nodes;
+    unsigned long key_collided;
+} hstats_t;
 
 struct hash {
 /* hash function */
@@ -176,6 +170,12 @@ struct hash {
     SHARED void *teststr;
     SHARED unsigned long teststr_num;
 };
+
+typedef struct {
+    volatile hv_t v;
+    unsigned long expiry_in_ms; /* expire in ms # of `gettimeofday`(2), 0 = never */
+    void *data;
+} node_t;
 
 
 /* -- 'Aliases' / 'Fct-like' macros -- */
