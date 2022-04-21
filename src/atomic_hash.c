@@ -123,7 +123,7 @@ typedef struct {
                  blk_node_num,
                  node_size,
                  blk_size;
-    volatile nid_t curr_blocks;
+    volatile nid_t cur_blocks;
 } mem_pool_t;
 
 typedef union {
@@ -136,12 +136,12 @@ typedef union {
 
 typedef struct {
     volatile hv_t v;
-    unsigned long expiry_in_ms; /* expire in ms # of gettimeofday(), 0 = never */
+    unsigned long expiry_in_ms; /* expire in ms # of `gettimeofday`(2), 0 = never */
     void *data;
 } node_t;
 
 typedef struct {
-    nid_t *b;             /* hash tab (int array as memory index */
+    nid_t *b;             /* hash tab (int array as memory index) */
     unsigned long ncur,
                   n,
                   nb;  /* nb: buckets #, set by n * r */
@@ -251,7 +251,7 @@ static mem_pool_t *create_mem_pool (unsigned int max_nodes, unsigned int node_si
     mpool->blk_node_num = (nid_t)(1 << (pwr2_block_size - pwr2_node_size));
     mpool->shift =        (nid_t)pwr2_block_size - pwr2_node_size;
     mpool->mask =         (nid_t)((1 << mpool->shift) - 1);
-    mpool->curr_blocks =  0;
+    mpool->cur_blocks =   0;
 
     if (!posix_memalign ((void **) (&mpool->ba), 64, mpool->max_blocks * sizeof (*mpool->ba))) {
         memset (mpool->ba, 0, mpool->max_blocks * sizeof (*mpool->ba));
@@ -270,7 +270,7 @@ static int destroy_mem_pool (mem_pool_t *mpool) {
         if (mpool->ba[i]) {
             free (mpool->ba[i]);
             mpool->ba[i] = NULL;
-            mpool->curr_blocks--;
+            mpool->cur_blocks--;
         }
 
     free (mpool->ba);
@@ -287,9 +287,9 @@ static inline nid_t *new_mem_block (mem_pool_t *mpool, volatile cas_t *recv_queu
         return NULL;
 
     nid_t i;
-    for (i = mpool->curr_blocks; i < mpool->max_blocks; i++)
+    for (i = mpool->cur_blocks; i < mpool->max_blocks; i++)
         if (CAS (&mpool->ba[i], NULL, p)) {
-            ATOMIC_ADD1 (mpool->curr_blocks);
+            ATOMIC_ADD1 (mpool->cur_blocks);
             break;
         }
 
@@ -440,7 +440,7 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     hmap->mpool = create_mem_pool (max_nodes, sizeof (node_t));
 //  hmap->mp = old_create_mem_pool (ht1->nb + ht2->nb + at1->nb, sizeof (node_t), max_blocks);
     PRINT_DEBUG_MSG("shift=%u; mask=%u\n", hmap->mpool->shift, hmap->mpool->mask);
-    PRINT_DEBUG_MSG("mem_blocks:\t%u/%u, %ux%u bytes, %u bytes per block\n", hmap->mpool->curr_blocks, hmap->mpool->max_blocks,
+    PRINT_DEBUG_MSG("mem_blocks:\t%u/%u, %ux%u bytes, %u bytes per block\n", hmap->mpool->cur_blocks, hmap->mpool->max_blocks,
                     hmap->mpool->blk_node_num, hmap->mpool->node_size, hmap->mpool->blk_size);
     if (!hmap->mpool)
         goto calloc_exit;
@@ -471,12 +471,12 @@ int atomic_hash_stats (hash_t *hmap, unsigned long escaped_milliseconds) {
 
     double d =         1024.0,
            blk_in_kB = hmap_mpool->blk_size / d,
-           mem =       hmap_mpool->curr_blocks * blk_in_kB;
+           mem =       hmap_mpool->cur_blocks * blk_in_kB;
 
     printf("mem=%.2f, blk_in_kB=%.2f, curr_block=%u, blk_nod_num=%u, node_size=%u\n",
-           mem, blk_in_kB, hmap_mpool->curr_blocks, hmap_mpool->blk_node_num, hmap_mpool->node_size);
+           mem, blk_in_kB, hmap_mpool->cur_blocks, hmap_mpool->blk_node_num, hmap_mpool->node_size);
     printf ("\n");
-    printf ("mem_blocks:\t%u/%u, %ux%u bytes, %.2f MB per block\n", hmap_mpool->curr_blocks, hmap_mpool->max_blocks,
+    printf ("mem_blocks:\t%u/%u, %ux%u bytes, %.2f MB per block\n", hmap_mpool->cur_blocks, hmap_mpool->max_blocks,
             hmap_mpool->blk_node_num, hmap_mpool->node_size, hmap_mpool->blk_size / 1048576.0);
     printf ("mem_to_max:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
             hmap_stats->mem_htabs / d, hmap_stats->mem_nodes / d, (hmap_stats->mem_htabs + hmap_stats->mem_nodes) / d);
@@ -491,19 +491,19 @@ int atomic_hash_stats (hash_t *hmap, unsigned long escaped_milliseconds) {
     printf ("---------------------------------------------------------------------------\n");
     printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", log_delim, log_delim, log_delim, log_delim, log_delim, log_delim, log_delim, log_delim);
 
-    htab_t *p;
+    htab_t *htab;
     unsigned long ncur = 0,
                   nadd = 0,
                   ndup = 0,
                   nget = 0,
                   ndel = 0;
-    for (unsigned long j = 0; j <= NMHT && (p = &hmap->ht[j]); j++) {
-        ncur += p->ncur;
-        nadd += p->nadd;
-        ndup += p->ndup;
-        nget += p->nget;
-        ndel += p->ndel;
-        printf ("%-4lu%-14lu%-14lu%-14lu%-14lu%-14lu\n", j, p->ncur, p->nadd, p->ndup, p->nget, p->ndel);
+    for (unsigned long j = 0; j <= NMHT && (htab = &hmap->ht[j]); j++) {
+        ncur += htab->ncur;
+        nadd += htab->nadd;
+        ndup += htab->ndup;
+        nget += htab->nget;
+        ndel += htab->ndel;
+        printf ("%-4lu%-14lu%-14lu%-14lu%-14lu%-14lu\n", j, htab->ncur, htab->nadd, htab->ndup, htab->nget, htab->ndel);
     }
     unsigned long op = ncur + nadd + ndup + nget + ndel + hmap_stats->get_nohit + hmap_stats->del_nohit + hmap_stats->add_nosit + hmap_stats->add_nomem + hmap_stats->escapes;
 
