@@ -289,27 +289,27 @@ static inline nid_t *mem_block_new (mem_pool_t *mpool, volatile cas_t *recv_queu
         return NULL;
     }
 
-    nid_t i;
-    for (i = mpool->cur_blocks; i < mpool->max_blocks; i++) {
-        if (CAS (&mpool->ba[i], NULL, p)) {
+    nid_t cur_block;
+    for (cur_block = mpool->cur_blocks; cur_block < mpool->max_blocks; cur_block++) {
+        if (CAS (&mpool->ba[cur_block], NULL, p)) {
             ATOMIC_ADD1 (mpool->cur_blocks);
             break;
         }
     }
 
-    if (i == mpool->max_blocks) {
+    if (cur_block == mpool->max_blocks) {
         free (p);
         return NULL;
     }
 
-    nid_t sz =   mpool->node_size,
-          m =    mpool->mask,
-          head = i * (m + 1);
-    for (i = 0; i < m; i++) {
-        *(nid_t *) ((char *)p + i * sz) = head + i + 1;
+    nid_t mpool_node_size = mpool->node_size,
+          mpool_mask = mpool->mask,
+          head = cur_block * (mpool_mask + 1);
+    for (nid_t i = 0; i < mpool_mask; i++) {
+        *(nid_t *) ((char *)p + i * mpool_node_size) = head + i + 1;
     }
 
-    MEMWORD cas_t *pn = (cas_t *) ((char *)p + m * sz);
+    MEMWORD cas_t *pn = (cas_t *) ((char *)p + mpool_mask * mpool_node_size);
     pn->cas.mi =  NNULL;
     pn->cas.rfn = 0;
     MEMWORD cas_t n,
@@ -321,7 +321,7 @@ static inline nid_t *mem_block_new (mem_pool_t *mpool, volatile cas_t *recv_queu
         x.cas.rfn = n.cas.rfn + 1;
     } while (!CAS (&recv_queue->all, n.all, x.all));
 
-    return (nid_t *) ((char *)p + m * sz);
+    return (nid_t *) ((char *)p + mpool_mask * mpool_node_size);
 }
 
 /* Default hooks */
