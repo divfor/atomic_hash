@@ -166,7 +166,7 @@ struct hash {
     SHARED hstats_t stats;
     SHARED void **hp;
     SHARED mem_pool_t *mpool;
-    SHARED unsigned long reset_expire; /* if > 0, reset node->expire */
+    SHARED unsigned long node_expiry_in_ms_reset_val; /* if > 0, reset node->expire */
     SHARED unsigned long nmht,
                          ncmp;
     SHARED unsigned long nkey,
@@ -323,7 +323,7 @@ static inline nid_t *new_mem_block (mem_pool_t *mpool, volatile cas_t *recv_queu
 static int default_cb_reset_ttl (void *hash_data, void *return_data) {
     if (return_data)
         *((void **)return_data) = hash_data;
-    return HOOK_SET_TTL_TO_DEFAULT;
+    return HOOK_RESET_TTL;
 }
 
 /* define your own func to return different ttl or removal instructions */
@@ -402,7 +402,7 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     hmap->cb_on_get =       default_cb_ttl_no_change;
     hmap->cb_on_dup =       default_cb_reset_ttl;
 
-    hmap->reset_expire =    reset_ttl;
+    hmap->node_expiry_in_ms_reset_val = reset_ttl;
     hmap->nmht =            NMHT;
     hmap->ncmp =            NCMP;
     hmap->nkey =            NKEY;   /* uint32_t # of hash function's output */
@@ -468,7 +468,7 @@ int atomic_hash_stats (hash_t *hmap, unsigned long escaped_milliseconds) {
     const htab_t *hmap_ht1 = &hmap->ht[0],
                  *hmap_ht2 = &hmap->ht[1];
     mem_pool_t *hmap_mpool = hmap->mpool;
-    
+
     double d =         1024.0,
            blk_in_kB = hmap_mpool->blk_size / d,
            mem =       hmap_mpool->curr_blocks * blk_in_kB;
@@ -615,8 +615,8 @@ static inline int try_get (hash_t *hmap, hv_t v, node_t *p, nid_t *seat, nid_t m
         free_node (hmap, mi);
         return 1;
     }
-    if (result == HOOK_SET_TTL_TO_DEFAULT)
-        result = hmap->reset_expire;
+    if (result == HOOK_RESET_TTL)
+        result = hmap->node_expiry_in_ms_reset_val;
     if (p->expiry_in_ms > 0 && result > 0)
         p->expiry_in_ms = result + gettime_in_ms();
     UNHOLD_BUCKET (p->v, v);
@@ -641,8 +641,8 @@ static inline int try_dup (hash_t *hmap, hv_t v, node_t *p, nid_t *seat, nid_t m
         free_node (hmap, mi);
         return 1;
     }
-    if (result == HOOK_SET_TTL_TO_DEFAULT)
-        result = hmap->reset_expire;
+    if (result == HOOK_RESET_TTL)
+        result = hmap->node_expiry_in_ms_reset_val;
     if (p->expiry_in_ms > 0 && result > 0)
         p->expiry_in_ms = result + gettime_in_ms();
     UNHOLD_BUCKET (p->v, v);
@@ -668,8 +668,8 @@ static inline int try_add (hash_t *hmap, node_t *p, nid_t *seat, nid_t mi, int i
         free_node (hmap, mi);
         return 1; /* abort adding this node */
     }
-    if (result == HOOK_SET_TTL_TO_DEFAULT)
-        result = hmap->reset_expire;
+    if (result == HOOK_RESET_TTL)
+        result = hmap->node_expiry_in_ms_reset_val;
     if (p->expiry_in_ms > 0 && result > 0)
         p->expiry_in_ms = result + gettime_in_ms();
     p->v.x = x;

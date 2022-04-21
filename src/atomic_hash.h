@@ -25,10 +25,10 @@
 
 /* -- Consts -- */
 /* callback function idx */
-#define HOOK_REMOVE_HASH_NODE   -1
-#define HOOK_SET_TTL_TO_DEFAULT -2
-#define HOOK_DONT_CHANGE_TTL    -3
-#define HOOK_SET_TTL_TO(n)      (n)
+#define HOOK_REMOVE_HASH_NODE -1
+#define HOOK_RESET_TTL        -2
+#define HOOK_DONT_CHANGE_TTL  -3
+#define HOOK_SET_TTL_TO(n)    (n)
 
 
 /* -- Types -- */

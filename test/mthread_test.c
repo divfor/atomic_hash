@@ -44,7 +44,7 @@ static unsigned long gettime_in_ms (void) {
 
 /* Hooks */
 static int cb_dup (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
-    return HOOK_SET_TTL_TO_DEFAULT;
+    return HOOK_RESET_TTL;
 }
 
 static int cb_add (__attribute__((unused))void *data, __attribute__((unused))void *arg) {

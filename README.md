@@ -1,9 +1,9 @@
 # atomic_hash
 
 ## Summary
-This is a hash table designed with high performance, lock-free and memory-saving. Multiple threads can concurrently perform read/write/delete operations up to 10M ops/s in mordern computer platform. It supports up to 2^32 hash items with O(1) performance for both of successful and unsuccessful search from the hash table.
+This is a hash table designed w/ high performance, lock-free and memory-saving. Multiple threads can concurrently perform read/write/delete operations up to 10M ops/s in modern computer platform. It supports up to 2^32 hash items with O(1) performance for both of successful and unsuccessful search from the hash table.
 
-By giving max hash item number, atomic_hash calculates two load factors to match expected collision rate and creates array 1 with higer load factor, array 2 with lower load factor, and a small arry 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving.
+By giving max hash item number, *atomic_hash* calculates two load factors to match expected collision rate and creates array 1 with higer load factor, array 2 with lower load factor, and a small array 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving.
 
 A design description (in chinese) is posted here:
 https://blog.csdn.net/divfor/article/details/44316291
@@ -27,9 +27,9 @@ typedef int (*hook_t)(void *hash_data, void *out)
 ```
 here `hash_data` will be copied from target hash node's `data` field by atomic hash functions (generally it is a pointer to link the user data), and `out` will be given by atomic hash function's caller. There are 5 function pointers (`cb_on_ttl`, `cb_on_del`, `cb_on_add`, `cb_on_get` and `cb_on_dup`) to register hook functions. The hook function should obey below rules:
   1. must be non-blocking and essential actions only. too much execution time will drop performance remarkablly;
-  2. `cb_on_ttl` and `cb_on_del` should free user data and must return -1 (`HOOK_REMOVE_HASH_NODE`).
-  3. `cb_on_get` and `cb_on_dup` may return either -2 (`HOOK_SET_TTL_TO_DEFAULT`) or a positive number that indicates updating ttl;
-  4. `cb_on_add` must return -3 (`HOOK_DONT_CHANGE_TTL`) as ttl will be set by `intital_ttl`;
+  2. `cb_on_ttl` and `cb_on_del` should free user data and must return `-1` (i.e., `HOOK_REMOVE_HASH_NODE`).
+  3. `cb_on_get` and `cb_on_dup` may return either `-2` (i.e., `HOOK_RESET_TTL`) or a positive number that indicates updating ttl;
+  4. `cb_on_add` must return `-3` (i.e., `HOOK_DONT_CHANGE_TTL`) as ttl will be set by `intital_ttl`;
 
 `atomic_hash_create` will initialize some built-in functions as default hook functions that only do value-copy for hash node's 'data' field and then return code. So you need to write your own hook functions to replace default ones if you want to free your user data's memeory or adjust ttl in the fly:
   ```c
