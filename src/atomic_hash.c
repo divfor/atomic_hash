@@ -433,15 +433,15 @@ hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     PRINT_DEBUG_MSG("init bucket array 1:\n");
     const double collision = COLLISION; /* collision control, larger is better */
     const double K = hmap->npos + 1;
-    unsigned long n1 = max_nodes;
-    double r1 = pow ((n1 * collision / (K * K)), (1.0 / (K * K - 1)));
+    const unsigned long n1 = max_nodes;
+    const double r1 = pow ((n1 * collision / (K * K)), (1.0 / (K * K - 1)));
     if (htab_init(hmap_ht1, n1, r1) < 0) {
         goto calloc_exit;
     }
 
     PRINT_DEBUG_MSG("init bucket array 2:\n");
-    unsigned long n2 = (n1 + 2.0) / (K * pow (r1, K - 1));
-    double r2 = pow (((n2 + 2.0) * collision / K), 1.0 / (K - 1));
+    const unsigned long n2 = (n1 + 2.0) / (K * pow (r1, K - 1));
+    const double r2 = pow (((n2 + 2.0) * collision / K), 1.0 / (K - 1));
     if (htab_init(hmap_ht2, n2, r2) < 0) {
         goto calloc_exit;
     }
