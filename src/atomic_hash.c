@@ -143,7 +143,7 @@ typedef struct {
     unsigned long key_collided;
 } hstats_t;
 
-struct hash {
+struct hmap {
 /* hash function */
     SHARED void (*hash_func)(const void *key, size_t len, void *r);
 
@@ -374,14 +374,14 @@ static int htab_init (htab_t *ht, unsigned long num, double ratio) {
 }
 
 
-hash_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
+hmap_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
     if (max_nodes < 2 || max_nodes > MAXTAB) {
         PRINT_DEBUG_MSG("max_nodes range: 2 ~ %lu\n", (unsigned long) MAXTAB);
         return NULL;
     }
 
 
-    hash_t *hmap;
+    hmap_t *hmap;
     if (posix_memalign ((void **) (&hmap), 64, sizeof (*hmap))) {
         return NULL;
     }
@@ -479,7 +479,7 @@ calloc_exit:
     return NULL;
 }
 
-int atomic_hash_stats (hash_t *hmap, unsigned long escaped_milliseconds) {
+int atomic_hash_stats (hmap_t *hmap, unsigned long escaped_milliseconds) {
     static const char* const log_delim = "    ";
 
     const hstats_t *hmap_stats = &hmap->stats;
@@ -541,7 +541,7 @@ int atomic_hash_stats (hash_t *hmap, unsigned long escaped_milliseconds) {
     return 0;
 }
 
-int atomic_hash_destroy (hash_t *hmap) {
+int atomic_hash_destroy (hmap_t *hmap) {
     if (!hmap) {
         return -1;
     }
@@ -555,7 +555,7 @@ int atomic_hash_destroy (hash_t *hmap) {
     return 0;
 }
 
-void atomic_hash_register_hooks(hash_t *hmap,
+void atomic_hash_register_hooks(hmap_t *hmap,
                                 hook_t cb_on_ttl, hook_t cb_on_add, hook_t cb_on_dup, hook_t cb_on_get, hook_t cb_on_del) {
     if (cb_on_ttl) {
         hmap->cb_on_ttl = cb_on_ttl;
@@ -576,7 +576,7 @@ void atomic_hash_register_hooks(hash_t *hmap,
 
 
 /* -------------------- -------------------- -------------------- -------------------- -------------------- */
-static inline nid_t node_new (hash_t *hmap) {
+static inline nid_t node_new (hmap_t *hmap) {
     MEMWORD cas_t n,
                   m;
     while (hmap->freelist.cas.mi != NNULL || mem_block_new(hmap->mpool, &hmap->freelist)) {
@@ -597,7 +597,7 @@ static inline nid_t node_new (hash_t *hmap) {
     return NNULL;
 }
 
-static inline void node_free (hash_t *hmap, nid_t mi) {
+static inline void node_free (hmap_t *hmap, nid_t mi) {
     cas_t *p = (cas_t *) (I2P (hmap->mpool, node_t, mi));
     p->cas.rfn = 0;
 
@@ -623,14 +623,14 @@ static inline int likely_equal (hv_t w, hv_t v) {
 
 
 /* only called in `atomic_hash_get` */
-static inline int try_get (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_fct, void *rtn) {
+static inline int try_get (hmap_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_on_get, void *rtn) {
     HOLD_BUCKET_OTHERWISE_RETURN_0 (hmap, node->v, v);
     if (*seat != mi) {
         UNHOLD_BUCKET (node->v, v);
         return 0;
     }
 
-    int result = cb_fct ? cb_fct (node->data, rtn) : hmap->cb_on_get (node->data, rtn);
+    int result = cb_on_get ? cb_on_get (node->data, rtn) : hmap->cb_on_get (node->data, rtn);
     if (HOOK_NODE_REMOVE == result) {
         if (CAS (seat, mi, NNULL)) {
             ATOMIC_SUB1 (hmap->ht[idx].ncur);
@@ -646,20 +646,21 @@ static inline int try_get (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_
     if (node->expiry_in_ms > 0 && result > 0) {
         node->expiry_in_ms = result + gettime_in_ms();
     }
+
     UNHOLD_BUCKET (node->v, v);
     ADD1 (hmap->ht[idx].nget);
     return 1;
 }
 
 /* only called in `atomic_hash_add` */
-static inline int try_dup (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_fct, void *rtn) {
+static inline int try_dup (hmap_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_on_dup, void *rtn) {
     HOLD_BUCKET_OTHERWISE_RETURN_0 (hmap, node->v, v);
     if (*seat != mi) {
         UNHOLD_BUCKET (node->v, v);
         return 0;
     }
 
-    int result = cb_fct ? cb_fct (node->data, rtn) : hmap->cb_on_dup (node->data, rtn);
+    int result = cb_on_dup ? cb_on_dup (node->data, rtn) : hmap->cb_on_dup (node->data, rtn);
     if (HOOK_NODE_REMOVE == result) {
         if (CAS (seat, mi, NNULL)) {
             ATOMIC_SUB1 (hmap->ht[idx].ncur);
@@ -675,13 +676,14 @@ static inline int try_dup (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_
     if (node->expiry_in_ms > 0 && result > 0) {
         node->expiry_in_ms = result + gettime_in_ms();
     }
+
     UNHOLD_BUCKET (node->v, v);
     ADD1 (hmap->ht[idx].ndup);
     return 1;
 }
 
 /* only called in `atomic_hash_add` */
-static inline int try_add (hash_t *hmap, node_t *node, nid_t *seat, nid_t mi, int idx, void *rtn) {
+static inline int try_add (hmap_t *hmap, node_t *node, nid_t *seat, nid_t mi, int idx, void *rtn) {
     hvu_t x = node->v.x;
     node->v.x = 0;
     if (!CAS (seat, NNULL, mi)) {
@@ -705,13 +707,14 @@ static inline int try_add (hash_t *hmap, node_t *node, nid_t *seat, nid_t mi, in
     if (node->expiry_in_ms > 0 && result > 0) {
         node->expiry_in_ms = result + gettime_in_ms();
     }
+
     node->v.x = x;
     ADD1 (hmap->ht[idx].nadd);
     return 1;
 }
 
 /* only called in atomic_hash_del */
-static inline int try_del (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_fct, void *rtn) {
+static inline int try_del (hmap_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_fct, void *rtn) {
     HOLD_BUCKET_OTHERWISE_RETURN_0 (hmap, node->v, v);
     if (*seat != mi || !CAS (seat, mi, NNULL)) {
         UNHOLD_BUCKET (node->v, v);
@@ -733,7 +736,7 @@ static inline int try_del (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_
     return 1;
 }
 
-static inline int valid_ttl (hash_t *hmap, unsigned long cur_time_in_ms, node_t *node, nid_t *seat, nid_t mi,
+static inline int valid_ttl (hmap_t *hmap, unsigned long cur_time_in_ms, node_t *node, nid_t *seat, nid_t mi,
                              int idx, nid_t *node_rtn, void *data_rtn) {
     unsigned long node_expiry_in_ms = node->expiry_in_ms;
     /* valid state, quickly skip to call try_action. */
@@ -814,8 +817,8 @@ static inline int valid_ttl (hash_t *hmap, unsigned long cur_time_in_ms, node_t 
 
 #define IDX(J) ((J) < (NCLUSTER * NKEY) ? 0 : 1)
 
-int atomic_hash_add (hash_t *hmap, const void *kwd, int len, void *data,
-                     int init_ttl, hook_t cb_fct_dup, void *arg) {
+int atomic_hash_add (hmap_t *hmap, const void *kwd, int len, void *data,
+                     int init_ttl, hook_t cb_on_dup, void *arg) {
     MEMWORD union { hv_t v; nid_t d[NKEY]; } t;
     unsigned long cur_time_in_ms = gettime_in_ms();
     if (len > 0) {
@@ -836,7 +839,7 @@ int atomic_hash_add (hash_t *hmap, const void *kwd, int len, void *data,
         if ((mi = *a[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi))) {
             if (valid_ttl (hmap, cur_time_in_ms, node, a[j], mi, IDX (j), &ni, NULL)) {
                 if (likely_equal (node->v, t.v)) {
-                    if (try_dup (hmap, t.v, node, a[j], mi, IDX (j), cb_fct_dup, arg)) {
+                    if (try_dup (hmap, t.v, node, a[j], mi, IDX (j), cb_on_dup, arg)) {
                         goto hash_value_exists;
                     }
                 }
@@ -849,7 +852,7 @@ int atomic_hash_add (hash_t *hmap, const void *kwd, int len, void *data,
         if ((mi = hmap->ht[NMHT].b[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi)) && i--) {
             if (valid_ttl (hmap, cur_time_in_ms, node, &hmap->ht[NMHT].b[j], mi, NMHT, &ni, NULL)) {
                 if (likely_equal (node->v, t.v)) {
-                    if (try_dup (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_fct_dup, arg)) {
+                    if (try_dup (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_on_dup, arg)) {
                         goto hash_value_exists;
                     }
                 }
@@ -895,7 +898,7 @@ hash_value_exists:
 }
 
 
-int atomic_hash_get (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void *arg) {
+int atomic_hash_get (hmap_t *hmap, const void *kwd, int len, hook_t cb_on_get, void *arg) {
     MEMWORD union { hv_t v; nid_t d[NKEY]; } t;
     unsigned long cur_time_in_ms = gettime_in_ms();
     if (len > 0) {
@@ -916,7 +919,7 @@ int atomic_hash_get (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void
         if ((mi = *a[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi))) {
             if (valid_ttl (hmap, cur_time_in_ms, node, a[j], mi, IDX (j), NULL, NULL)) {
                 if (likely_equal (node->v, t.v)) {
-                    if (try_get (hmap, t.v, node, a[j], mi, IDX (j), cb_fct, arg)) {
+                    if (try_get (hmap, t.v, node, a[j], mi, IDX (j), cb_on_get, arg)) {
                         return 0;
                     }
                 }
@@ -929,7 +932,7 @@ int atomic_hash_get (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void
         if ((mi = hmap->ht[NMHT].b[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi)) && ++i) {
             if (valid_ttl (hmap, cur_time_in_ms, node, &hmap->ht[NMHT].b[j], mi, NMHT, NULL, NULL)) {
                 if (likely_equal (node->v, t.v)) {
-                    if (try_get (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_fct, arg)) {
+                    if (try_get (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_on_get, arg)) {
                         return 0;
                     }
                 }
@@ -941,7 +944,7 @@ int atomic_hash_get (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void
     return -1;
 }
 
-int atomic_hash_del (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void *arg) {
+int atomic_hash_del (hmap_t *hmap, const void *kwd, int len, hook_t cb_on_del, void *arg) {
     MEMWORD union { hv_t v; nid_t d[NKEY]; } t;
     if (len > 0) {
         hmap->hash_func (kwd, len, &t);
@@ -963,7 +966,7 @@ int atomic_hash_del (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void
         if ((mi = *a[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi))) {
             if (valid_ttl (hmap, cur_time_in_ms, node, a[j], mi, IDX (j), NULL, NULL)) {
                 if (likely_equal (node->v, t.v)) {
-                    if (try_del (hmap, t.v, node, a[j], mi, IDX (j), cb_fct, arg)) {
+                    if (try_del (hmap, t.v, node, a[j], mi, IDX (j), cb_on_del, arg)) {
                         del_matches++;
                     }
                 }
@@ -976,7 +979,7 @@ int atomic_hash_del (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void
             if ((mi = hmap->ht[NMHT].b[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi))) {
                 if (valid_ttl (hmap, cur_time_in_ms, node, &hmap->ht[NMHT].b[j], mi, NMHT, NULL, NULL)) {
                     if (likely_equal (node->v, t.v)) {
-                        if (try_del (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_fct, arg)) {
+                        if (try_del (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_on_del, arg)) {
                             del_matches++;
                         }
                     }
@@ -998,22 +1001,22 @@ int atomic_hash_del (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void
 
 
 /* - Test functions - */
-void (*atomic_hash_debug_get_hash_func(hash_t *hmap))(const void *key, size_t len, void *r) {
+void (*atomic_hash_debug_get_hash_func(hmap_t *hmap))(const void *key, size_t len, void *r) {
     return hmap->hash_func;
 }
 
-void *atomic_hash_debug_get_teststr(hash_t *hmap) {
+void *atomic_hash_debug_get_teststr(hmap_t *hmap) {
     return hmap->teststr;
 }
 
-void atomic_hash_debug_set_teststr(hash_t *hmap, void *teststr) {
+void atomic_hash_debug_set_teststr(hmap_t *hmap, void *teststr) {
     hmap->teststr = teststr;
 }
 
-unsigned long atomic_hash_debug_get_teststr_num(hash_t *hmap) {
+unsigned long atomic_hash_debug_get_teststr_num(hmap_t *hmap) {
     return hmap->teststr_num;
 }
 
-void atomic_hash_debug_set_teststr_num(hash_t *hmap, unsigned long teststr_num) {
+void atomic_hash_debug_set_teststr_num(hmap_t *hmap, unsigned long teststr_num) {
     hmap->teststr_num = teststr_num;
 }

@@ -11,15 +11,15 @@ https://blog.csdn.net/divfor/article/details/44316291
 ## Usage
 Use below functions to create a hash handle that associates its arrays and memory pool, print statistics of it, or release it.
 ```c
-hash_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
-int atomic_hash_stats (hash_t *h, unsigned long escaped_milliseconds);
-int atomic_hash_destroy (hash_t *h);
+hmap_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
+int atomic_hash_stats (hmap_t *hmap, unsigned long escaped_milliseconds);
+int atomic_hash_destroy (hmap_t *hmap);
 ```
 The hash handle can be copied to any number of threads for calling below hash functions:
 ```c
-int atomic_hash_add (hash_t *h, void *key, int key_len, void *user_data, int init_ttl, hook_t func_on_dup, void *out);
-int atomic_hash_del (hash_t *h, void *key, int key_len, hook_t func_on_del, void *out); //delete all matches
-int atomic_hash_get (hash_t *h, void *key, int key_len, hook_t func_on_get, void *out); //get the first match
+int atomic_hash_add (hmap_t *hmap, void *key, int key_len, void *user_data, int init_ttl, hook_t cb_on_dup, void *out);
+int atomic_hash_del (hmap_t *hmap, void *key, int key_len, hook_t cb_on_del, void *out); //delete all matches
+int atomic_hash_get (hmap_t *hmap, void *key, int key_len, hook_t cb_on_get, void *out); //get the first match
 ```
 Not like normal hash functions that return user data directly, atomic hash functions return status code -- 0 for successful operation and non-zero for unsuccessful operation. Instead, atomic hash functions call hook functions to deal with user data once they find target hash node. The hook functions should be defined as following format:
 ```c
