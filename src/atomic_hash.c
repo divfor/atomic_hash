@@ -22,8 +22,8 @@
 /*
  * - TODOs:
  *   1. Hashmap:
- *     1.1. allow hash functions to accept hash value as input instead of key that can reduce hash cacalulating.
- *     1.2. enable elastic memory pool for screnaios that run with huge number of hash nodes (approximate 3 million nodes / 100 MB)
+ *     1.1. allow hash functions to accept hash value as input instead of key that can reduce hash calculating.
+ *     1.2. enable elastic memory pool for scenarios that run with huge number of hash nodes (approximate 3 million nodes / 100 MB)
  *   2. CMake:
  *     2.1. Integrate unimplemented hash functions
  *     2.2. CMake install option
@@ -191,15 +191,16 @@ struct hash {
 //#define UNHOLD_BUCKET(HV, V)    do { if ((HV).y && !(HV).x) (HV).x = (V).x; } while(0)
 #define UNHOLD_BUCKET(HV, V)    while ((HV).y && !CAS (&(HV).x, 0, (V).x))
 #define HOLD_BUCKET_OTHERWISE_RETURN_0(HMAP, HV, V) do { unsigned long __l = MAXSPIN; \
-          while (!CAS(&(HV).x, (V).x, 0)) { /* when CAS fails */ \
-            if ((HV).x != (V).x) return 0; /* already released or reused */\
-            while ((HV).x == 0) { /* wait for unhold */ \
-              if ((HV).y == 0) return 0; /* no unhold but released */ \
-              if (--__l == 0) { ADD1 ((HMAP)->stats.escapes); return 0; } /* give up */ \
-              if (__l & 0x0f) usleep(1); else sched_yield(); /* original: __asm__("pause") */ \
-          }} \
-          if ((HV).y != (V).y || (HV).y == 0) { UNHOLD_BUCKET (HV, V); return 0; } \
-          } while (0)
+    while (!CAS(&(HV).x, (V).x, 0)) { /* when CAS fails */ \
+        if ((HV).x != (V).x) return 0; /* already released or reused */\
+        while ((HV).x == 0) { /* wait for unhold */ \
+            if ((HV).y == 0) return 0; /* no unhold but released */ \
+            if (--__l == 0) { ADD1 ((HMAP)->stats.escapes); return 0; } /* give up */ \
+            if (__l & 0x0f) usleep(1); else sched_yield(); /* original: __asm__("pause") */ \
+        } \
+    } \
+    if ((HV).y != (V).y || (HV).y == 0) { UNHOLD_BUCKET (HV, V); return 0; } \
+    } while (0)
 
 
 /* -- Debugging macros -- */
