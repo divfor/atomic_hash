@@ -237,8 +237,8 @@ static mem_pool_t *mem_pool_create (unsigned int max_nodes, unsigned int node_si
 
 #define PW2_MAX_BLK_PTR 9   /* hard code one 4K-page for max 512 block pointers */
 #define PW2_MIN_BLK_SIZ 12  /* 2^12 = 4K page size */
-    unsigned int pwr2_total_size = pwr2_max_nodes + pwr2_node_size,
-                 pwr2_block_size = (pwr2_total_size <= PW2_MAX_BLK_PTR + PW2_MIN_BLK_SIZ) ? (PW2_MIN_BLK_SIZ) : (pwr2_total_size - PW2_MAX_BLK_PTR);
+    const unsigned int pwr2_total_size = pwr2_max_nodes + pwr2_node_size,
+                       pwr2_block_size = (pwr2_total_size <= PW2_MAX_BLK_PTR + PW2_MIN_BLK_SIZ) ? (PW2_MIN_BLK_SIZ) : (pwr2_total_size - PW2_MAX_BLK_PTR);
 
     mem_pool_t *mpool;
     if (posix_memalign ((void **) (&mpool), 64, sizeof (*mpool))) {
@@ -286,7 +286,7 @@ static int mem_pool_destroy (mem_pool_t *mpool) {
 static inline nid_t *mem_block_new (mem_pool_t *mpool, volatile cas_t *recv_queue) {
 
     void *p = calloc (mpool->blk_node_num, mpool->node_size);
-    if (!mpool || !p) {
+    if (!mpool || !p) {         // TODO: mpool should be `assert`
         return NULL;
     }
 
@@ -330,7 +330,7 @@ static int default_cb_reset_ttl (void *hash_data, void *return_data) {
     if (return_data) {
         *((void **)return_data) = hash_data;
     }
-    return HOOK_RESET_TTL;
+    return HOOK_TTL_RESET;
 }
 
 /* define your own func to return different ttl or removal instructions */
@@ -338,14 +338,14 @@ static int default_cb_ttl_no_change (void *hash_data, void *return_data) {
     if (return_data) {
         *((void **)return_data) = hash_data;
     }
-    return HOOK_DONT_CHANGE_TTL;
+    return HOOK_TTL_DONT_CHANGE;
 }
 
 static int default_cb_remove_node (void *hash_data, void *return_data) {
     if (return_data) {
         *((void **)return_data) = hash_data;
     }
-    return HOOK_REMOVE_HASH_NODE;
+    return HOOK_NODE_REMOVE;
 }
 
 static int htab_init (htab_t *ht, unsigned long num, double ratio) {
@@ -631,7 +631,7 @@ static inline int try_get (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_
     }
 
     int result = cb_fct ? cb_fct (node->data, rtn) : hmap->cb_on_get (node->data, rtn);
-    if (HOOK_REMOVE_HASH_NODE == result) {
+    if (HOOK_NODE_REMOVE == result) {
         if (CAS (seat, mi, NNULL)) {
             ATOMIC_SUB1 (hmap->ht[idx].ncur);
         }
@@ -640,7 +640,7 @@ static inline int try_get (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_
         node_free(hmap, mi);
         return 1;
     }
-    if (HOOK_RESET_TTL == result) {
+    if (HOOK_TTL_RESET == result) {
         result = hmap->node_expiry_in_ms_reset_val;
     }
     if (node->expiry_in_ms > 0 && result > 0) {
@@ -660,7 +660,7 @@ static inline int try_dup (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_
     }
 
     int result = cb_fct ? cb_fct (node->data, rtn) : hmap->cb_on_dup (node->data, rtn);
-    if (HOOK_REMOVE_HASH_NODE == result) {
+    if (HOOK_NODE_REMOVE == result) {
         if (CAS (seat, mi, NNULL)) {
             ATOMIC_SUB1 (hmap->ht[idx].ncur);
         }
@@ -669,7 +669,7 @@ static inline int try_dup (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_
         node_free(hmap, mi);
         return 1;
     }
-    if (HOOK_RESET_TTL == result) {
+    if (HOOK_TTL_RESET == result) {
         result = hmap->node_expiry_in_ms_reset_val;
     }
     if (node->expiry_in_ms > 0 && result > 0) {
@@ -691,7 +691,7 @@ static inline int try_add (hash_t *hmap, node_t *node, nid_t *seat, nid_t mi, in
 
     ATOMIC_ADD1 (hmap->ht[idx].ncur);
     int result = hmap->cb_on_add (node->data, rtn);
-    if (HOOK_REMOVE_HASH_NODE == result) {
+    if (HOOK_NODE_REMOVE == result) {
         if (CAS (seat, mi, NNULL)) {
             ATOMIC_SUB1 (hmap->ht[idx].ncur);
         }
@@ -699,7 +699,7 @@ static inline int try_add (hash_t *hmap, node_t *node, nid_t *seat, nid_t mi, in
         node_free(hmap, mi);
         return 1; /* abort adding this node */
     }
-    if (HOOK_RESET_TTL == result) {
+    if (HOOK_TTL_RESET == result) {
         result = hmap->node_expiry_in_ms_reset_val;
     }
     if (node->expiry_in_ms > 0 && result > 0) {
