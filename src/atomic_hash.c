@@ -1,6 +1,4 @@
 /*
- * atomic_hash.c
- *
  * 2012-2015 Copyright (c)
  * Fred Huang, <divfor@gmail.com>
  * All rights reserved.
@@ -690,18 +688,20 @@ static inline int try_del (hash_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_
     memset (node, 0, sizeof (*node));
     ADD1 (hmap->ht[idx].ndel);
     free_node (hmap, mi);
+
     if (cb_fct)
         cb_fct (user_data, rtn);
     else
         hmap->cb_on_del (user_data, rtn);
+
     return 1;
 }
 
 static inline int valid_ttl (hash_t *hmap, unsigned long cur_time_in_ms, node_t *node, nid_t *seat, nid_t mi,
                              int idx, nid_t *node_rtn, void *data_rtn) {
-    unsigned long expire = node->expiry_in_ms;
+    unsigned long node_expiry_in_ms = node->expiry_in_ms;
     /* valid state, quickly skip to call try_action. */
-    if (expire == 0 || expire > cur_time_in_ms)
+    if (node_expiry_in_ms == 0 || node_expiry_in_ms > cur_time_in_ms)
         return 1;
 
     hv_t v = node->v;
@@ -733,6 +733,7 @@ static inline int valid_ttl (hash_t *hmap, unsigned long cur_time_in_ms, node_t 
         *node_rtn = mi;
     else
         free_node (hmap, mi);
+
     if (hmap->cb_on_ttl)
         hmap->cb_on_ttl (user_data, data_rtn);
 
@@ -771,7 +772,7 @@ static inline int valid_ttl (hash_t *hmap, unsigned long cur_time_in_ms, node_t 
 
 #endif /* NKEY */
 
-#define IDX(J) (J < (NCLUSTER * NKEY) ? 0 : 1)
+#define IDX(J) ((J) < (NCLUSTER * NKEY) ? 0 : 1)
 
 int atomic_hash_add (hash_t *hmap, const void *kwd, int len, void *data,
                      int init_ttl, hook_t cb_fct_dup, void *arg) {
@@ -908,6 +909,8 @@ int atomic_hash_del (hash_t *hmap, const void *kwd, int len, hook_t cb_fct, void
     return -1;
 }
 /* -------------------- -------------------- -------------------- -------------------- -------------------- */
+
+
 
 
 /* - Test functions - */

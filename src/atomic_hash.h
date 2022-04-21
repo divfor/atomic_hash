@@ -1,6 +1,4 @@
 ﻿/*
- * atomic_hash.h
- *
  * 2012-2015 Copyright (c)
  * Fred Huang, <divfor@gmail.com>
  * All rights reserved.
