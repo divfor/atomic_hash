@@ -31,7 +31,7 @@
  *     2.2. CMake install option
  *
  * - Revise:
- *   - Replace `__asm__("pause")` w/ `usleep(1)` + `#include <unistd.h>` (for more portable code)
+ *   - Replaced `__asm__("pause")` w/ `usleep(1)` + `#include <unistd.h>` (for more portable code)
  */
 #include <stdio.h>
 #include <string.h>
@@ -80,6 +80,7 @@ typedef struct {
 
 /* - Misc. - */
 #define NNULL     0xFFFFFFFF
+
 #define NMHT      2
 #define NCLUSTER  4
 #define NSEAT     (NMHT * NKEY * NCLUSTER)
@@ -135,7 +136,7 @@ typedef union {
 
 typedef struct {
     volatile hv_t v;
-    unsigned long expire; /* expire in ms # of gettimeofday(), 0 = never */
+    unsigned long expiry_in_ms; /* expire in ms # of gettimeofday(), 0 = never */
     void *data;
 } node_t;
 
@@ -171,6 +172,7 @@ struct hash {
     SHARED unsigned long nkey,
                          npos,
                          nseat; /* nseat = 2*npos = 4*nkey */
+
 
 
     SHARED void *teststr;
@@ -586,7 +588,7 @@ static inline void free_node (hash_t *hmap, nid_t mi) {
 
 static inline void set_hash_node (node_t *p, hv_t v, void *data, unsigned long expire) {
     p->v =      v;
-    p->expire = expire;
+    p->expiry_in_ms = expire;
     p->data =   data;
 }
 
@@ -613,8 +615,8 @@ static inline int try_get (hash_t *hmap, hv_t v, node_t *p, nid_t *seat, nid_t m
     }
     if (result == HOOK_SET_TTL_TO_DEFAULT)
         result = hmap->reset_expire;
-    if (p->expire > 0 && result > 0)
-        p->expire = result + gettime_in_ms();
+    if (p->expiry_in_ms > 0 && result > 0)
+        p->expiry_in_ms = result + gettime_in_ms();
     UNHOLD_BUCKET (p->v, v);
     ADD1 (hmap->ht[idx].nget);
     return 1;
@@ -639,8 +641,8 @@ static inline int try_dup (hash_t *hmap, hv_t v, node_t *p, nid_t *seat, nid_t m
     }
     if (result == HOOK_SET_TTL_TO_DEFAULT)
         result = hmap->reset_expire;
-    if (p->expire > 0 && result > 0)
-        p->expire = result + gettime_in_ms();
+    if (p->expiry_in_ms > 0 && result > 0)
+        p->expiry_in_ms = result + gettime_in_ms();
     UNHOLD_BUCKET (p->v, v);
     ADD1 (hmap->ht[idx].ndup);
     return 1;
@@ -666,8 +668,8 @@ static inline int try_add (hash_t *hmap, node_t *p, nid_t *seat, nid_t mi, int i
     }
     if (result == HOOK_SET_TTL_TO_DEFAULT)
         result = hmap->reset_expire;
-    if (p->expire > 0 && result > 0)
-        p->expire = result + gettime_in_ms();
+    if (p->expiry_in_ms > 0 && result > 0)
+        p->expiry_in_ms = result + gettime_in_ms();
     p->v.x = x;
     ADD1 (hmap->ht[idx].nadd);
     return 1;
@@ -695,7 +697,7 @@ static inline int try_del (hash_t *hmap, hv_t v, node_t *p, nid_t *seat, nid_t m
 
 static inline int valid_ttl (hash_t *hmap, unsigned long cur_time_in_ms, node_t *p, nid_t *seat, nid_t mi,
                              int idx, nid_t *node_rtn, void *data_rtn) {
-    unsigned long expire = p->expire;
+    unsigned long expire = p->expiry_in_ms;
     /* valid state, quickly skip to call try_action. */
     if (expire == 0 || expire > cur_time_in_ms)
         return 1;
@@ -707,7 +709,7 @@ static inline int valid_ttl (hash_t *hmap, unsigned long cur_time_in_ms, node_t 
 
     HOLD_BUCKET_OTHERWISE_RETURN_0 (hmap, p->v, v);
     /* re-enter valid state, skip to call try_action */
-    if (p->expire == 0 || p->expire > cur_time_in_ms) {
+    if (p->expiry_in_ms == 0 || p->expiry_in_ms > cur_time_in_ms) {
         UNHOLD_BUCKET (p->v, v);
         return 1;
     }

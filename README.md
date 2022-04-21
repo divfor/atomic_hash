@@ -42,11 +42,11 @@ In the call time, instead of hook functions registered in `cb_on_dup`/`cb_on_get
 ### About TTL
 TTL (in milliseconds) is designed to enable timer for hash nodes. Set `reset_ttl` to 0 to disable this feature so that all hash items never expire. If `reset_ttl` is set to >0, you still can set `init_ttl` to 0 to mark specified hash items that never expire.
 
-`reset_ttl`: `atomic_hash_create` uses it to set `hash_node->expire`. each successful lookup by `atomic_hash_add` or `atomic_hash_get` may reset target hash node's `hash_node->expire` to (now + `reset_ttl`), per your `cb_on_dup` / `cb_on_get` hook functions;
+`reset_ttl`: `atomic_hash_create` uses it to set `hash_node->expiry_in_ms`. each successful lookup by `atomic_hash_add` or `atomic_hash_get` may reset target hash node's `hash_node->expiry_in_ms` to (now + `reset_ttl`), per your `cb_on_dup` / `cb_on_get` hook functions;
 
-`init_ttl`：`atomic_hash_add` uses it to set `hash_node->expire` to (now + `init_ttl`). If `init_ttl` == 0, hash_node will never expires as it will NOT be reset by `reset_ttl`.
+`init_ttl`：`atomic_hash_add` uses it to set `hash_node->expiry_in_ms` to (now + `init_ttl`). If `init_ttl` == 0, hash_node will never expires as it will NOT be reset by `reset_ttl`.
 
-`hash_node->expire`: hash node's 'expire' field. If `expire` == 0, this hash node will never expire; If `expire` > 0, this hash node will become expired when current time is larger than expire, but no removal action immediately applies on it. However, since it's expired, it may be removed by any of hash add/get/del calls that traverses it (in another words, no active cleanup thread to clear expired item). So your must free user data's memory in your own `hash_handle->cb_on_ttl` hook function!!!
+`hash_node->expiry_in_ms`: hash node's 'expire' field. If `expiry_in_ms` == 0, this hash node will never expire; If `expiry_in_ms` > 0, this hash node will become expired when current time is larger than `expiry_in_ms`, but no removal action immediately applies on it. However, since it's expired, it may be removed by any of hash add/get/del calls that traverses it (in another words, no active cleanup thread to clear expired item). So your must free user data's memory in your own `hash_handle->cb_on_ttl` hook function!!!
 
 
 ## Build
