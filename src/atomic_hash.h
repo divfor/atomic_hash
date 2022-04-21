@@ -47,7 +47,7 @@ void atomic_hash_register_hooks(hash_t *hmap,
 int atomic_hash_destroy (hash_t *hmap);
 int atomic_hash_add (hash_t *h, const void *key, int key_len, void *user_data, int init_ttl, hook_t cb_fct_dup, void *out);
 int atomic_hash_del (hash_t *h, const void *key, int key_len, hook_t func_on_del, void *out); //delete all matches
-int atomic_hash_get (hash_t *h, const void *key, int key_len, hook_t func_on_get, void *out); //get the first match
+int atomic_hash_get (hash_t *h, const void *key, int key_len, hook_t cb_fct, void *out); //get the first match
 int atomic_hash_stats (hash_t *hmap, unsigned long escaped_milliseconds);
 
 #endif /* ATOMIC_HASH_H */

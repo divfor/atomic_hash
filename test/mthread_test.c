@@ -66,12 +66,14 @@ static int cb_ttl (void *data, __attribute__((unused))void *arg) {
     return HOOK_REMOVE_HASH_NODE;
 }
 
+/*
 static int cb_random_loop (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
     unsigned long j = 0;
     //struct timeval tv;  gettimeofday (&tv, NULL);  usleep (tv.tv_usec % 1000);
     for (unsigned long i = mt_rand () % 10000; i > 0; i--) j += i;
     return j % 2;
 }
+*/
 
 
 /* - Test fct -*/
@@ -245,7 +247,7 @@ int main (int argc, char **argv) {
     for (unsigned long i = 0; i <= thread_num; i++)
         pthread_join (pid[i], NULL);
 
-    puts ("All threads closed.");
+    puts ("All threads terminated.");
     for (unsigned long i = 0; i < num_strings; i++)
         free (a[i].s);
     free (a);
