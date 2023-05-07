@@ -1,5 +1,5 @@
 
-# -- CMake options --
+# --  CMake options  --
 option(WITH_BENCHMARK_TEST "Build benchmark test (works only on GNU/Linux ??)" OFF)
 
 

@@ -29,4 +29,4 @@ jobs:
 
       - name: Build w/ CMake
         shell: bash
-        run: cmake --build $PROJECT_BUILD_PATH
+        run: cmake --build $PROJECT_BUILD_PATH -- -j

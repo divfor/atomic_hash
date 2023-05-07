@@ -510,7 +510,7 @@ uint128 CityHashCrc128(const char *s, size_t len) {
 
 
 inline void cityhash_128 (const void *s, const size_t len, void *r) {
-    *(uint128 *)r = CityHashCrc128 ((char *)s, len);
-    if (((uint64_t *)r)[0] == 0) ((uint64_t *)r)[0] += 1;
-    if (((uint64_t *)r)[1] == 0) ((uint64_t *)r)[1] += 1;
+    *(uint128*)r = CityHashCrc128 ((char*)s, len);
+    if (((uint64_t*)r)[0] == 0) ((uint64_t*)r)[0] += 1;
+    if (((uint64_t*)r)[1] == 0) ((uint64_t*)r)[1] += 1;
 }

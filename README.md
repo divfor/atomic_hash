@@ -3,7 +3,7 @@
 ## Summary
 This is a hash table designed w/ high performance, lock-free and memory-saving. Multiple threads can concurrently perform read/write/delete operations up to 10M ops/s in modern computer platform. It supports up to 2^32 hash items with O(1) performance for both of successful and unsuccessful search from the hash table.
 
-By giving max hash item number, *atomic_hash* calculates two load factors to match expected collision rate and creates array 1 with higer load factor, array 2 with lower load factor, and a small array 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving.
+By giving max hash item number, *atomic_hash* calculates two load factors to match expected collision rate and creates array 1 with higher load factor, array 2 with lower load factor, and a small array 3 to store collision items. memory pool for hash nodes (not for user data) is also designed for both of high performance and memory saving.
 
 A design description (in chinese) is posted here:
 https://blog.csdn.net/divfor/article/details/44316291
@@ -26,18 +26,18 @@ Not like normal hash functions that return user data directly, atomic hash funct
 typedef int (*hook_t)(void *hash_data, void *out)
 ```
 here `hash_data` will be copied from target hash node's `data` field by atomic hash functions (generally it is a pointer to link the user data), and `out` will be given by atomic hash function's caller. There are 5 function pointers (`cb_on_ttl`, `cb_on_del`, `cb_on_add`, `cb_on_get` and `cb_on_dup`) to register hook functions. The hook function should obey below rules:
-  1. must be non-blocking and essential actions only. too much execution time will drop performance remarkablly;
+  1. must be non-blocking and essential actions only. too much execution time will drop performance remarkably;
   2. `cb_on_ttl` and `cb_on_del` should free user data and must return `-1` (i.e., `HOOK_NODE_REMOVE`).
   3. `cb_on_get` and `cb_on_dup` may return either `-2` (i.e., `HOOK_TTL_RESET`) or a positive number that indicates updating ttl;
-  4. `cb_on_add` must return `-3` (i.e., `HOOK_TTL_DONT_CHANGE`) as ttl will be set by `intital_ttl`;
+  4. `cb_on_add` must return `-3` (i.e., `HOOK_TTL_DONT_CHANGE`) as ttl will be set by `initial_ttl`;
 
-`atomic_hash_create` will initialize some built-in functions as default hook functions that only do value-copy for hash node's 'data' field and then return code. So you need to write your own hook functions to replace default ones if you want to free your user data's memeory or adjust ttl in the fly:
+`atomic_hash_create` will initialize some built-in functions as default hook functions that only do value-copy for hash node's 'data' field and then return code. So you need to write your own hook functions to replace default ones if you want to free your user data's memory or adjust ttl in the fly:
   ```C
   h->cb_on_ttl = your_own_on_ttl_hook_func;
   h->cb_on_add = your_own_on_add_hook_func;
   ...
   ```
-In the call time, instead of hook functions registered in `cb_on_dup`/`cb_on_get`/`cb_on_del`, hash functions `atomic_hash_add`, `atomic_hash_get`, `atomic_hash_del` are able to use an alertative function as long as they obey above hook function rules. This will give flexibility to deal with different user data type in a same hash table.
+In the call time, instead of hook functions registered in `cb_on_dup`/`cb_on_get`/`cb_on_del`, hash functions `atomic_hash_add`, `atomic_hash_get`, `atomic_hash_del` are able to use an alternative function as long as they obey above hook function rules. This will give flexibility to deal with different user data type in a same hash table.
 
 ### About TTL
 TTL (in milliseconds) is designed to enable timer for hash nodes. Set `reset_ttl` to 0 to disable this feature so that all hash items never expire. If `reset_ttl` is set to >0, you still can set `init_ttl` to 0 to mark specified hash items that never expire.
@@ -51,14 +51,12 @@ TTL (in milliseconds) is designed to enable timer for hash nodes. Set `reset_ttl
 
 ## Build
 ### Prerequisites
-* Installed pkg-config, cmake & ccmake (Note: ccmake is optional):
+* Installed `pkg-config`, `cmake` & optionally `ccmake`:
     * Debian/Ubuntu: `sudo apt install -y pkg-config cmake cmake-curses-gui`
     * macOS: `brew install pkg-config cmake`
-* Requirements based on chosen cmake options:
-  * `HASH_FUNCTION`: `MD5HASH` requires OpenSSL (package `libssl-dev` for Debian/Ubuntu)
 
 ### Out-of-source build
 1. `mkdir build && cd build`
 2. `ccmake -DCMAKE_BUILD_TYPE=Release ..` &rarr; press `c` &rarr; press `c` &rarr; press `g`
-3. `cmake --build .`
+3. `cmake --build . -- -j`
     * Library (static & shared) will be in `build/src`

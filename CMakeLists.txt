@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.9.4)
 project(atomic_hash C)
 
 
-# -- Project settings --
+# --  Project settings  --
 set(CMAKE_C_STANDARD 99)
 #set(CMAKE_C_COMPILER clang)
 
@@ -12,7 +12,7 @@ set(CMAKE_C_STANDARD 99)
 #set(CMAKE_DEBUG_TARGET_PROPERTIES INCLUDE_DIRECTORIES)
 
 
-# -- Preprocessor / Compile options --
+# --  Preprocessor / Compile options  --
 add_compile_options(
     -Wall -Wextra -pedantic
     -Wformat=2
@@ -43,14 +43,14 @@ else()
 endif()
 
 
-# -- CMake options --
+# --  CMake options  --
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
     message(STATUS "No build type selected, defaulting to ** ${CMAKE_BUILD_TYPE} **")
 endif()
 
 
-# -- "Subdirs" containing projects --
+# --  "Subdirs" containing projects  --
 add_subdirectory(src/)
 add_subdirectory(test/)
 

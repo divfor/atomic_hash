@@ -24,6 +24,9 @@
  *   1. Hashmap:
  *     1.1. allow hash functions to accept hash value as input instead of key that can reduce hash calculating.
  *     1.2. enable elastic memory pool for scenarios that run with huge number of hash nodes (approximate 3 million nodes / 100 MB)
+ *     1.3. HASH-FCTs:
+ *         - FIX MPQ3HASH & NEWHASH SEGFAULT / compiler warnings
+ *         - FIX MURMUR3 compiler warnings
  *   2. CMake:
  *     2.1. Integrate unimplemented hash functions
  *     2.2. CMake install option
@@ -42,13 +45,12 @@
 
 /* -- Consts -- */
 /* - Available hash functions - */
-#define CITY3HASH_128   1
-#define MD5HASH         2
-// #define MPQ3HASH        3
-// #define NEWHASH         4
-// #define MURMUR3HASH_128 5
+#define CITY3HASH_128   (1)
+#define MPQ3HASH        (3)
+#define NEWHASH         (4)
+#define MURMUR3HASH_128 (5)
 
-#if HASH_FUNCTION == CITY3HASH_128 || HASH_FUNCTION == MD5HASH // || HASH_FUNCTION == MURMUR3HASH_128
+#if HASH_FUNCTION == CITY3HASH_128 || HASH_FUNCTION == MURMUR3HASH_128
 #  define NKEY 4
 #  define NCMP 2
 
@@ -58,17 +60,15 @@ typedef struct {
           y;
 } hv_t;
 
-// #elif HASH_FUNCTION == MPQ3HASH || HASH_FUNCTION == NEWHASH
-// #  define NKEY 3
-// #  define NCMP 3
-//
-// typedef uint32_t hvu_t;
-// typedef struct {
-//     hvu_t x,
-//           y,
-//           z;
-// } hv_t;
-//
+#elif HASH_FUNCTION == MPQ3HASH || HASH_FUNCTION == NEWHASH
+#  define NKEY 3
+#  define NCMP 3
+typedef uint32_t hvu_t;
+typedef struct {
+    hvu_t x,
+          y,
+          z;
+} hv_t;
 #endif /* HASH_FUNCTION */
 
 
@@ -141,7 +141,7 @@ typedef struct {
 
 struct hmap {
 /* hash function */
-    SHARED void (*hash_func)(const void *key, size_t len, void *r);
+    SHARED void(*hash_func)(const void *key, size_t len, void *r);
 
 /* hook func to deal w/ user data in safe zone */
     SHARED hook_t cb_on_ttl,
@@ -175,7 +175,7 @@ typedef struct {
 
 
 /* -- 'Aliases' / 'Fct-like' macros -- */
-#define MEMWORD                 __attribute__((aligned(sizeof(void *))))
+#define MEMWORD                 __attribute__((aligned(sizeof(void*))))
 
 #define ATOMIC_ADD1(V)          __sync_fetch_and_add(&(V), 1)
 #define ATOMIC_SUB1(V)          __sync_fetch_and_sub(&(V), 1)
@@ -189,7 +189,7 @@ typedef struct {
 #  define PAUSE() do { usleep(1); } while(0)
 #endif
 
-#define IP(MP, TYPE, I)         (((TYPE *)((MP)->ba[(I) >> (MP)->shift]))[(I) & (MP)->mask])
+#define IP(MP, TYPE, I)         (((TYPE*)((MP)->ba[(I) >> (MP)->shift]))[(I) & (MP)->mask])
 #define I2P(MP, TYPE, I)        (NNULL == (I) ? NULL : &(IP(MP, TYPE, I)))
 //#define UNHOLD_BUCKET(HV, V)    do { if ((HV).y && !(HV).x) (HV).x = (V).x; } while(0)
 #define UNHOLD_BUCKET(HV, V)    while ((HV).y && !CAS (&(HV).x, 0, (V).x))
@@ -247,7 +247,7 @@ static mem_pool_t *mem_pool_create (unsigned int max_nodes, unsigned int node_si
     if (posix_memalign ((void **) (&mpool), 64, sizeof (*mpool))) {
         return NULL;
     }
-    memset (mpool, 0, sizeof (*mpool));
+    memset(mpool, 0, sizeof(*mpool));
 
     mpool->max_blocks =   (nid_t)(1 << (PW2_MAX_BLK_PTR));
     mpool->node_size =    (nid_t)(1 << pwr2_node_size);
@@ -262,26 +262,26 @@ static mem_pool_t *mem_pool_create (unsigned int max_nodes, unsigned int node_si
         return mpool;
     }
 
-    free (mpool);
+    free(mpool);
     return NULL;
 }
 
-static int mem_pool_destroy (mem_pool_t *mpool) {
+static int mem_pool_destroy(mem_pool_t *mpool) {
     if (!mpool) {
         return -1;
     }
 
     for (unsigned long i = 0; i < mpool->max_blocks; i++) {
         if (mpool->ba[i]) {
-            free (mpool->ba[i]);
+            free(mpool->ba[i]);
             mpool->ba[i] = NULL;
             mpool->cur_blocks--;
         }
     }
 
-    free (mpool->ba);
+    free(mpool->ba);
     mpool->ba = NULL;
-    free (mpool);
+    free(mpool);
 
     return 0;
 }
@@ -302,7 +302,7 @@ static inline nid_t *mem_block_new (mem_pool_t *mpool, volatile cas_t *recv_queu
     }
 
     if (cur_block == mpool->max_blocks) {
-        free (p);
+        free(p);
         return NULL;
     }
 
@@ -310,10 +310,10 @@ static inline nid_t *mem_block_new (mem_pool_t *mpool, volatile cas_t *recv_queu
           mpool_mask = mpool->mask,
           head = cur_block * (mpool_mask + 1);
     for (nid_t i = 0; i < mpool_mask; i++) {
-        *(nid_t *) ((char *)p + i * mpool_node_size) = head + i + 1;
+        *(nid_t*) ((char*)p + i * mpool_node_size) = head + i + 1;
     }
 
-    MEMWORD cas_t *pn = (cas_t *) ((char *)p + mpool_mask * mpool_node_size);
+    MEMWORD cas_t *pn = (cas_t*) ((char*)p + mpool_mask * mpool_node_size);
     pn->cas.mi =  NNULL;
     pn->cas.rfn = 0;
     MEMWORD cas_t n,
@@ -325,7 +325,7 @@ static inline nid_t *mem_block_new (mem_pool_t *mpool, volatile cas_t *recv_queu
         x.cas.rfn = n.cas.rfn + 1;
     } while (!CAS (&recv_queue->all, n.all, x.all));
 
-    return (nid_t *) ((char *)p + mpool_mask * mpool_node_size);
+    return (nid_t*) ((char*)p + mpool_mask * mpool_node_size);
 }
 
 /* Default hooks */
@@ -385,28 +385,27 @@ hmap_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
 
 
     hmap_t *hmap;
-    if (posix_memalign ((void **) (&hmap), 64, sizeof (*hmap))) {
+    if (posix_memalign ((void**) (&hmap), 64, sizeof(*hmap))) {
         return NULL;
     }
-    memset (hmap, 0, sizeof (*hmap));
+    memset(hmap, 0, sizeof(*hmap));
 
-#if HASH_FUNCTION == MD5HASH
-#  include "hash_functions/hash_md5.h"
-    hmap->hash_func = md5hash;
-#elif HASH_FUNCTION == CITY3HASH_128
-#  include "hash_functions/hash_city.h"
+#if HASH_FUNCTION == CITY3HASH_128
+#  include <hash_city.h>
     hmap->hash_func = cityhash_128;
-// #elif HASH_FUNCTION == MPQ3HASH
-// #  include "hash_functions/hash_mpq.h"
-//   uint32_t ct[0x500];
-//   init_crypt_table (ct);
-//   hmap->hash_func = mpq3hash;
-// #elif HASH_FUNCTION == NEWHASH
-// #  include "hash_functions/hash_newhash.h"
-//   hmap->hash_func = newhash;
-// #elif HASH_FUNCTION == MURMUR3HASH_128
-// #  include "hash_functions/hash_murmur3.h"
-//   hmap->hash_func = MurmurHash3_x64_128;
+    (void)(NEWHASH);
+    (void)(MPQ3HASH);
+#elif HASH_FUNCTION == MPQ3HASH
+#  include "hash_functions/hash_mpq.h"
+  uint32_t ct[0x500];
+  init_crypt_table(ct);
+  hmap->hash_func = mpq3hash;
+#elif HASH_FUNCTION == NEWHASH
+#  include <hash_newhash.h>
+   hmap->hash_func = newhash;
+#elif HASH_FUNCTION == MURMUR3HASH_128
+#  include <hash_murmur3.h>
+    hmap->hash_func = MurmurHash3_x64_128;
 #else
 #  error "atomic_hash: No hash function has been selected!"
 #endif
@@ -588,7 +587,7 @@ static inline nid_t node_new (hmap_t *hmap) {
             continue;
         }
 
-        m.cas.mi = ((cas_t *) (I2P (hmap->mpool, node_t, n.cas.mi)))->cas.mi;
+        m.cas.mi = ((cas_t*) (I2P (hmap->mpool, node_t, n.cas.mi)))->cas.mi;
         m.cas.rfn = n.cas.rfn + 1;
 
         if (CAS (&hmap->freelist.all, n.all, m.all)) {
@@ -601,7 +600,7 @@ static inline nid_t node_new (hmap_t *hmap) {
 }
 
 static inline void node_free (hmap_t *hmap, nid_t mi) {
-    cas_t *p = (cas_t *) (I2P (hmap->mpool, node_t, mi));
+    cas_t *p = (cas_t*) (I2P(hmap->mpool, node_t, mi));
     p->cas.rfn = 0;
 
     MEMWORD cas_t n,
