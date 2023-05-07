@@ -10,7 +10,7 @@ env:
 jobs:
   atomic_hash:
     name: Build atomic_hash
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
 

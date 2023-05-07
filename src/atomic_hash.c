@@ -27,9 +27,6 @@
  *   2. CMake:
  *     2.1. Integrate unimplemented hash functions
  *     2.2. CMake install option
- *
- * - Revise:
- *   - Replaced `__asm__("pause")` w/ `usleep(1)` + `#include <unistd.h>` (for more portable code)
  */
 #include <stdio.h>
 #include <string.h>
@@ -38,10 +35,9 @@
 #include <math.h>
 #include <sys/time.h>
 #include <sched.h>
-#include <unistd.h>
 
-#include "atomic_hash.h"
-#include "atomic_hash_debug.h"
+#include <atomic_hash.h>
+#include <atomic_hash_debug.h>
 
 
 /* -- Consts -- */
@@ -186,6 +182,13 @@ typedef struct {
 #define ADD1(V)                 __sync_fetch_and_add(&(V), 1)
 #define CAS(DST, OLD, NEW)      __sync_bool_compare_and_swap((DST), (OLD), (NEW))
 
+#if defined(__i386__) || defined(__x86_64__)
+#  define PAUSE() do { __asm__("pause"); } while(0)
+#else
+#  include <unistd.h>
+#  define PAUSE() do { usleep(1); } while(0)
+#endif
+
 #define IP(MP, TYPE, I)         (((TYPE *)((MP)->ba[(I) >> (MP)->shift]))[(I) & (MP)->mask])
 #define I2P(MP, TYPE, I)        (NNULL == (I) ? NULL : &(IP(MP, TYPE, I)))
 //#define UNHOLD_BUCKET(HV, V)    do { if ((HV).y && !(HV).x) (HV).x = (V).x; } while(0)
@@ -196,7 +199,7 @@ typedef struct {
         while ((HV).x == 0) { /* wait for unhold */ \
             if ((HV).y == 0) return 0; /* no unhold but released */ \
             if (--__l == 0) { ADD1 ((HMAP)->stats.escapes); return 0; } /* give up */ \
-            if (__l & 0x0f) usleep(1); else sched_yield(); /* original: __asm__("pause") */ \
+            if (__l & 0x0f) PAUSE(); else sched_yield(); \
         } \
     } \
     if ((HV).y != (V).y || (HV).y == 0) { UNHOLD_BUCKET (HV, V); return 0; } \
@@ -532,7 +535,7 @@ int atomic_hash_stats (hmap_t *hmap, unsigned long escaped_milliseconds) {
             hmap_stats->get_nohit, hmap_stats->add_nosit, hmap_stats->add_nomem, hmap_stats->expires, hmap_stats->escapes);
     printf ("---------------------------------------------------------------------------\n");
     if (escaped_milliseconds > 0) {
-        printf ("escaped_time=%.3fs, op=%lu, ops=%.2fM/s\n", escaped_milliseconds * 1.0 / 1000, op,
+        printf ("elapsed_time=%.3fs, op=%lu, ops=%.2fM/s\n", escaped_milliseconds * 1.0 / 1000, op,
                 (double) op / 1000.0 / escaped_milliseconds);
     }
     printf ("\n");

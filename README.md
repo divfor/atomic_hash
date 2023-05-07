@@ -10,19 +10,19 @@ https://blog.csdn.net/divfor/article/details/44316291
 
 ## Usage
 Use below functions to create a hash handle that associates its arrays and memory pool, print statistics of it, or release it.
-```c
+```C
 hmap_t * atomic_hash_create (unsigned int max_nodes, int reset_ttl);
 int atomic_hash_stats (hmap_t *hmap, unsigned long escaped_milliseconds);
 int atomic_hash_destroy (hmap_t *hmap);
 ```
 The hash handle can be copied to any number of threads for calling below hash functions:
-```c
+```C
 int atomic_hash_add (hmap_t *hmap, void *key, int key_len, void *user_data, int init_ttl, hook_t cb_on_dup, void *out);
 int atomic_hash_del (hmap_t *hmap, void *key, int key_len, hook_t cb_on_del, void *out); //delete all matches
 int atomic_hash_get (hmap_t *hmap, void *key, int key_len, hook_t cb_on_get, void *out); //get the first match
 ```
 Not like normal hash functions that return user data directly, atomic hash functions return status code -- 0 for successful operation and non-zero for unsuccessful operation. Instead, atomic hash functions call hook functions to deal with user data once they find target hash node. The hook functions should be defined as following format:
-```c
+```C
 typedef int (*hook_t)(void *hash_data, void *out)
 ```
 here `hash_data` will be copied from target hash node's `data` field by atomic hash functions (generally it is a pointer to link the user data), and `out` will be given by atomic hash function's caller. There are 5 function pointers (`cb_on_ttl`, `cb_on_del`, `cb_on_add`, `cb_on_get` and `cb_on_dup`) to register hook functions. The hook function should obey below rules:
@@ -32,7 +32,7 @@ here `hash_data` will be copied from target hash node's `data` field by atomic h
   4. `cb_on_add` must return `-3` (i.e., `HOOK_TTL_DONT_CHANGE`) as ttl will be set by `intital_ttl`;
 
 `atomic_hash_create` will initialize some built-in functions as default hook functions that only do value-copy for hash node's 'data' field and then return code. So you need to write your own hook functions to replace default ones if you want to free your user data's memeory or adjust ttl in the fly:
-  ```c
+  ```C
   h->cb_on_ttl = your_own_on_ttl_hook_func;
   h->cb_on_add = your_own_on_add_hook_func;
   ...

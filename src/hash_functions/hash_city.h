@@ -67,8 +67,8 @@ struct _uint128 {
     uint64 second;
 };
 
-#define Uint128Low64(x) 	(x).first
-#define Uint128High64(x)	(x).second
+#define Uint128Low64(x)     (x).first
+#define Uint128High64(x)    (x).second
 
 // Hash function for a byte array.
 uint64 CityHash64(const char *buf, size_t len);

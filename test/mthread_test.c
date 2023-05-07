@@ -8,13 +8,21 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
-#include <assert.h>
 #include <stdint.h>
 
 #include "utils/mtrand.h"
 
-#include "atomic_hash.h"
-#include "atomic_hash_debug.h"
+#include <atomic_hash.h>
+#include <atomic_hash_debug.h>
+
+#define EXPANDSTR(str) #str
+#define STRINGIFY(str) EXPANDSTR(str)
+#define ASSERT(TRUTH, MSG_FMT, ...) do { \
+    if (! (TRUTH) ) { \
+        fprintf(stderr, "ASSERT FAILED @ " __FILE__ ":" STRINGIFY(__LINE__) ": " MSG_FMT "\n", ##__VA_ARGS__); \
+        abort(); \
+    } \
+ } while(0)
 
 
 /* -- Consts -- */
@@ -28,7 +36,7 @@
 
 
 /* -- Types -- */
-typedef struct teststr {
+typedef struct {
     char *s;
     uint64_t hv[2];
     int len;
@@ -38,32 +46,32 @@ typedef struct teststr {
 /* -- Functions -- */
 static unsigned long gettime_in_ms (void) {
     struct timeval tv;
-    gettimeofday (&tv, NULL);
+    gettimeofday(&tv, NULL);
     return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
 }
 
 /* Hooks */
 static int cb_dup (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
-    return HOOK_RESET_TTL;
+    return HOOK_TTL_RESET;
 }
 
 static int cb_add (__attribute__((unused))void *data, __attribute__((unused))void *arg) {
-    return HOOK_DONT_CHANGE_TTL;
+    return HOOK_TTL_DONT_CHANGE;
 }
 
 static int cb_get (void *data, void *arg) {
-    *((void **)arg) = strdup(data);
-    return HOOK_DONT_CHANGE_TTL;
+    *((void**)arg) = strdup(data);
+    return HOOK_TTL_DONT_CHANGE;
 }
 
 static int cb_del (void *data, __attribute__((unused))void *arg) {
     free (data);
-    return HOOK_REMOVE_HASH_NODE;
+    return HOOK_NODE_REMOVE;
 }
 
 static int cb_ttl (void *data, __attribute__((unused))void *arg) {
     free (data);
-    return HOOK_REMOVE_HASH_NODE;
+    return HOOK_NODE_REMOVE;
 }
 
 /*
@@ -78,7 +86,7 @@ static int cb_random_loop (__attribute__((unused))void *data, __attribute__((unu
 
 /* - Test fct -*/
 static void *routine_test (void *arg) {
-    hash_t *hmap = (hash_t *) arg;
+    hmap_t *hmap = (hmap_t*) arg;
 
     teststr_t* const hmap_teststr_ptr = (teststr_t*)atomic_hash_debug_get_teststr(hmap);
     unsigned long hmap_teststr_num = atomic_hash_debug_get_teststr_num(hmap);
@@ -114,7 +122,7 @@ static void *routine_test (void *arg) {
                 //str = strdup (p->s);  free (str);
                 ret = strcmp(p->s, buf);
                 free (buf);
-                assert (ret == 0);
+                ASSERT(ret == 0, "Fail");
             }
         }
 
@@ -129,7 +137,7 @@ static void *routine_test (void *arg) {
 }
 
 static void * routine_stats (void *arg) {
-    hash_t *hmap = (hash_t *) arg;
+    hmap_t *hmap = (hmap_t *) arg;
 //    printf ("pid[%ld]: started thread_printf() \n", syscall (SYS_gettid));
     unsigned long t0 = gettime_in_ms();
     while (1) {
@@ -145,17 +153,17 @@ static void * routine_stats (void *arg) {
 }
 
 
-static int set_cpus (int num_cpus) {
-    cpu_set_t *cpuset_ptr = CPU_ALLOC(num_cpus);
+static int set_cpus (const int ncpus) {
+    cpu_set_t *cpuset_ptr = CPU_ALLOC(ncpus);
     if (cpuset_ptr == NULL) {
         perror("CPU_ALLOC");
         exit(EXIT_FAILURE);
     }
 
-    size_t size = CPU_ALLOC_SIZE(num_cpus);
+    size_t size = CPU_ALLOC_SIZE(ncpus);
     CPU_ZERO_S(size, cpuset_ptr);
     int cpu;
-    for (cpu = 1; cpu < num_cpus; cpu += 2)
+    for (cpu = 1; cpu < ncpus; cpu += 2)
         CPU_SET_S(cpu, size, cpuset_ptr);
     printf("CPU_COUNT() of set:    %d\n", CPU_COUNT_S(size, cpuset_ptr));
     if (sched_setaffinity(0, size, cpuset_ptr) == -1) {
@@ -169,8 +177,8 @@ static int set_cpus (int num_cpus) {
 
 
 
-int main (int argc, char **argv) {
-    int cpu_num = sysconf(_SC_NPROCESSORS_ONLN);
+int main(int argc, char **argv) {
+    const int ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 
     unsigned long nlines = 0;
     if (argc >= 3)
@@ -196,7 +204,7 @@ int main (int argc, char **argv) {
     if (!(fp = fopen (argv[1], "r")))
         return -1;
 
-    hash_t *phash = atomic_hash_create (100, TTL_ON_CREATE),
+    hmap_t *phash = atomic_hash_create (100, TTL_ON_CREATE),
            *ptmp = phash;
     unsigned long num_strings = 0;
     while (num_strings < nlines && fgets (sbuf, 1023, fp)) {
@@ -234,7 +242,7 @@ int main (int argc, char **argv) {
 
 
     unsigned int thread_num;
-    thread_num = (NT <= 8 ? NT : set_cpus (cpu_num));
+    thread_num = (NT <= 8 ? NT : set_cpus (ncpu));
     thread_num = (NT > 16 ? NT : thread_num);
 
     pthread_t threads[thread_num + 1];
