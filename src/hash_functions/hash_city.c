@@ -32,6 +32,11 @@
 // possible hash functions, by using SIMD instructions, or by
 // compromising on hash quality.
 
+#if !defined(__x86_64__)
+#  error "Unsupported CPU architecture"
+#endif
+
+
 #include <string.h>
 #include "hash_city.h"
 

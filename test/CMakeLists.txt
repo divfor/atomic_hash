@@ -1,10 +1,12 @@
 
-# --  CMake options  --
+# -----------------------------------------------------------------------------
+# CMake- / Compile options
+# -----------------------------------------------------------------------------
 option(WITH_BENCHMARK_TEST "Build benchmark test (works only on GNU/Linux ??)" OFF)
-
-
-# --  CMake targets  --
 if (WITH_BENCHMARK_TEST)
+# -----------------------------------------------------------------------------
+# CMake targets
+# -----------------------------------------------------------------------------
     add_executable(mthread_test
             utils/mtrand.c
             utils/mtrand.h

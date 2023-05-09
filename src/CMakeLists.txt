@@ -1,5 +1,4 @@
 
-# --  Vars  --
 set(HMAP_SOURCES atomic_hash.c)
 set(HMAP_INCLUDE_PUBLIC_DIRS ${atomic_hash_SOURCE_DIR}/include/)
 set(HMAP_INCLUDE_PRIVATE_DIRS ${atomic_hash_SOURCE_DIR}/src/hash_functions/)
@@ -7,7 +6,9 @@ set(HMAP_COMPILE_OPTIONS -fPIC)
 set(HMAP_LINK_LIBS m)
 
 
-# --  CMake options  --
+# -----------------------------------------------------------------------------
+# CMake- / Compile options
+# -----------------------------------------------------------------------------
 set(HASH_FUNCTION "CITY3HASH_128" CACHE STRING "Hash function to be used for hashmap (may depend on specific CPU arch or 3rd party libs)")
 set_property(CACHE HASH_FUNCTION PROPERTY STRINGS "CITY3HASH_128;MURMUR3_128")   #"CITY3HASH_128;MPQ3HASH;NEWHASH;MURMUR3_128"
 
@@ -43,7 +44,9 @@ else()
 endif()
 
 
-# --  CMake targets  --
+# -----------------------------------------------------------------------------
+# CMake targets
+# -----------------------------------------------------------------------------
 set(LIB_BASENAME "atomichash")
 
 add_library(atomichash-object OBJECT ${HMAP_SOURCES})
@@ -67,7 +70,7 @@ target_link_libraries(atomichash-static PRIVATE ${HMAP_LINK_LIBS})
 set_target_properties(atomichash-static PROPERTIES OUTPUT_NAME ${LIB_BASENAME})
 
 
-# --  Print info  --
+
 message(STATUS "")
 message(STATUS "Library base name     : ${LIB_BASENAME}")
 message(STATUS "")

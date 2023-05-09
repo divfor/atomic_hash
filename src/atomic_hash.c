@@ -206,12 +206,12 @@ typedef struct {
     } while (0)
 
 
-/* -- Debugging macros -- */
+/* --  Debugging macros  -- */
 // #define PRINT_DEBUG_MSGS
 #ifdef PRINT_DEBUG_MSGS
-#  define PRINT_DEBUG_MSG(format, ...) printf(format, ##__VA_ARGS__)
+#  define PRINT_DEBUG_MSG(FMT, ...) do { printf(FMT, ##__VA_ARGS__); } while(0)
 #else
-#  define PRINT_DEBUG_MSG(format, ...) do { } while(0)
+#  define PRINT_DEBUG_MSG(FMT, ...) do { } while(0)
 #endif
 
 

@@ -57,6 +57,6 @@ TTL (in milliseconds) is designed to enable timer for hash nodes. Set `reset_ttl
 
 ### Out-of-source build
 1. `mkdir build && cd build`
-2. `ccmake -DCMAKE_BUILD_TYPE=Release ..` &rarr; press `c` &rarr; press `c` &rarr; press `g`
-3. `cmake --build . -- -j`
+2. `cmake ..`
+3. `make -j`
     * Library (static & shared) will be in `build/src`
