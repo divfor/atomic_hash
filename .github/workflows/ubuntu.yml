@@ -1,0 +1,32 @@
+name: CI Pipeline [Ubuntu]
+
+on: [push, pull_request]
+
+env:
+  PROJECT_BUILD_TYPE: Release
+  PROJECT_BASE_PATH: '${{github.workspace}}'
+  PROJECT_BUILD_PATH: '${{github.workspace}}/build'
+
+jobs:
+  atomic_hash:
+    name: Build atomic_hash
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      # - Clean (unnecessary ??) + Build -
+      - name: Cleanup
+        shell: bash
+        run: rm -rf $PROJECT_BUILD_PATH
+
+      - name: Create Build Environment
+        shell: bash
+        run: cmake -E make_directory $PROJECT_BUILD_PATH
+
+      - name: Configure CMake
+        shell: bash
+        run: cmake -B $PROJECT_BUILD_PATH -S $PROJECT_BASE_PATH -DCMAKE_BUILD_TYPE=$PROJECT_BUILD_TYPE
+
+      - name: Build w/ CMake
+        shell: bash
+        run: cmake --build $PROJECT_BUILD_PATH -- -j

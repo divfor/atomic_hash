@@ -40,26 +40,23 @@
    Vol. 8, No. 1, January 1998, pp 3--30.
 */
 
-/**************************************************
- *  Modified by Fred Huang to enable thread-safe
- *  ***********************************************
-*/
+/***************************************************
+ *  Modified by Fred Huang to enable thread-safety *
+ **************************************************/
 
 #include "mtrand.h"
 
 /* Period parameters */
 #define N 624
 #define M 397
-#define MATRIX_A 0x9908b0dfUL	/* constant vector a */
-#define UPPER_MASK 0x80000000UL	/* most significant w-r bits */
-#define LOWER_MASK 0x7fffffffUL	/* least significant r bits */
+#define MATRIX_A 0x9908b0dfUL    /* constant vector a */
+#define UPPER_MASK 0x80000000UL    /* most significant w-r bits */
+#define LOWER_MASK 0x7fffffffUL    /* least significant r bits */
 
-static unsigned long x[N];	/* the array for the state vector  */
+static unsigned long x[N];    /* the array for the state vector  */
 static unsigned long n;
 
-void
-mt_srand (unsigned long s)
-{
+void mt_srand (unsigned long s) {
   int i;
   n = 0;
   x[0] = s & MT_RAND_MAX;
@@ -67,17 +64,14 @@ mt_srand (unsigned long s)
     x[i] = (1812433253UL * (x[i-1] ^ (x[i-1] >> 30)) + i) & MT_RAND_MAX;
 }
 
-void mt_seed(void)
-{
-  mt_srand (5489UL);  /* Default seed */
+void mt_seed(void) {
+  mt_srand(5489UL);  /* Default seed */
 }
 
 /* generates a random number on the interval [0,0xffffffff] */
-unsigned long
-mt_rand (void)
-{
+unsigned long mt_rand(void) {
   register unsigned long y, i, j;
-  i = __sync_fetch_and_add (&n, 1) % N;
+  i = __sync_fetch_and_add(&n, 1) % N;
   j = (i == N - 1 ? 0 : i + 1);
   /* Twisted feedback */
   y = x[i] = x[i<N-M ? i+M : i+M-N] ^ \
@@ -92,16 +86,12 @@ mt_rand (void)
 }
 
 /* generates a random number on the interval [0,1]. */
-float
-mt_rand_1 (void)
-{
+float mt_rand_1(void) {
   return ((float) mt_rand () / (float) MT_RAND_MAX);
 }
 
 /* generates a random number on the interval [0,1). */
-float
-mt_rand_lt1 (void)
-{
+float mt_rand_lt1(void) {
   /* MT_RAND_MAX must be a float before adding one to it! */
   return ((float) mt_rand () / ((float) MT_RAND_MAX + 1.0f));
 }

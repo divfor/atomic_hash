@@ -1,6 +1,5 @@
-#ifndef __HASH_NEWHASH__
-#define __HASH_NEWHASH__
 #include <stdint.h>
+#include <stddef.h>
 
 #define mix(a,b,c) \
 { \
@@ -20,7 +19,7 @@ void
 newhash(const void *s, const size_t len, void *r)
 {
    register uint32_t a = 0x9e3779b9, b = 0x9e3779b9, c = 0;
-   register uint32_t *t = (uint32_t *)s;
+   register uint32_t *t = (uint32_t*)s;
    size_t sz;    /* how many key bytes still need mixing */
 
    for (sz = len; sz >= 12; sz -= 12)
@@ -31,8 +30,8 @@ newhash(const void *s, const size_t len, void *r)
       mix(a, b, c);
    }
    c += len;
-   
-   unsigned char *k = (unsigned char *)t;
+
+   unsigned char *k = (unsigned char*)t;
    switch(sz)
    {
    case 11: c=c+((uint32_t)k[10]<<24);
@@ -49,8 +48,7 @@ newhash(const void *s, const size_t len, void *r)
    case 1 : a=a+k[0];
    }
    mix(a, b, c);
-   ((uint32_t *)r)[0] = c;
-   ((uint32_t *)r)[1] = a;
-   ((uint32_t *)r)[2] = b;
+   ((uint32_t*)r)[0] = c;
+   ((uint32_t*)r)[1] = a;
+   ((uint32_t*)r)[2] = b;
 }
-#endif

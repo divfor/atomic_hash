@@ -1,7 +1,5 @@
-/* 
- * atomic_hash.c
- *
- * 2012-2015 Copyright (c) 
+/*
+ * 2012-2015 Copyright (c)
  * Fred Huang, <divfor@gmail.com>
  * All rights reserved.
  *
@@ -21,739 +19,1006 @@
  *
  */
 
+/*
+ * - TODOs:
+ *   1. Hashmap:
+ *     1.1. allow hash functions to accept hash value as input instead of key that can reduce hash calculating.
+ *     1.2. enable elastic memory pool for scenarios that run with huge number of hash nodes (approximate 3 million nodes / 100 MB)
+ *     1.3. HASH-FCTs:
+ *         - FIX MPQ3HASH & NEWHASH SEGFAULT / compiler warnings
+ *         - FIX MURMUR3 compiler warnings
+ *   2. CMake:
+ *     2.1. Integrate unimplemented hash functions
+ *     2.2. CMake install option
+ */
 #include <stdio.h>
-#include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <ctype.h>
-#include <poll.h>
 #include <math.h>
-#include <assert.h>
 #include <sys/time.h>
 #include <sched.h>
-#include "atomic_hash.h"
 
-#if defined (MPQ3HASH) || defined (NEWHASH)
-#define NKEY 3
-#elif defined (CITY3HASH_128) || defined (MURMUR3HASH_128) || defined (MD5HASH)
-#define NKEY 4
+#include <atomic_hash.h>
+#include <atomic_hash_debug.h>
+
+
+/* -- Consts -- */
+/* - Available hash functions - */
+#define CITY3HASH_128   (1)
+#define MPQ3HASH        (3)
+#define NEWHASH         (4)
+#define MURMUR3HASH_128 (5)
+
+#if HASH_FUNCTION == CITY3HASH_128 || HASH_FUNCTION == MURMUR3HASH_128
+#  define NKEY 4
+#  define NCMP 2
+
+typedef uint64_t hvu_t;
+typedef struct {
+    hvu_t x,
+          y;
+} hv_t;
+
+#elif HASH_FUNCTION == MPQ3HASH || HASH_FUNCTION == NEWHASH
+#  define NKEY 3
+#  define NCMP 3
+typedef uint32_t hvu_t;
+typedef struct {
+    hvu_t x,
+          y,
+          z;
+} hv_t;
+#endif /* HASH_FUNCTION */
+
+
+/* - Misc. - */
+#define NNULL     0xFFFFFFFF
+
+#define NMHT      2
+#define NCLUSTER  4
+#define NSEAT     (NMHT * NKEY * NCLUSTER)
+#define MINTAB    64
+#define MAXTAB    NNULL
+#define COLLISION 1000 /* 0.01 ~> avg 25 in seat */
+#define MAXSPIN   (1 << 20) /* 2^20 loops 40ms with pause + sched_yield on xeon E5645 */
+
+
+/* -- Types -- */
+#define SHARED __attribute__((aligned(64)))
+
+typedef uint32_t nid_t;
+
+// typedef struct {
+//     unsigned long xadd,
+//                   xget,
+//                   xdel,
+//                   nexp;
+// } hc_t; /* 64-bytes cache line */
+
+typedef struct {
+    void **ba;
+    SHARED nid_t mask,
+                 shift; /* used for I2P() only */
+    SHARED nid_t max_blocks,
+                 blk_node_num,
+                 node_size,
+                 blk_size;
+    volatile nid_t cur_blocks;
+} mem_pool_t;
+
+typedef struct {
+    nid_t *b;             /* hash tab (int array as memory index) */
+    unsigned long ncur,
+                  n,
+                  nb;  /* nb: buckets #, set by n * r */
+    unsigned long nadd,
+                  ndup,
+                  nget,
+                  ndel;
+} htab_t;
+
+typedef union {
+    struct {
+        nid_t mi,
+                rfn;
+    } cas;
+    uint64_t all;
+} cas_t;
+
+typedef struct {
+    unsigned long expires;
+    unsigned long escapes;
+    unsigned long add_nomem;
+    unsigned long add_nosit;
+    unsigned long del_nohit;
+    unsigned long get_nohit;
+    unsigned long mem_htabs;
+    unsigned long mem_nodes;
+    unsigned long max_nodes;
+    unsigned long key_collided;
+} hstats_t;
+
+struct hmap {
+/* hash function */
+    SHARED void(*hash_func)(const void *key, size_t len, void *r);
+
+/* hook func to deal w/ user data in safe zone */
+    SHARED hook_t cb_on_ttl,
+                  cb_on_add,
+                  cb_on_dup,
+                  cb_on_get,
+                  cb_on_del;
+    SHARED volatile cas_t freelist; /* free hash node list */
+    SHARED htab_t ht[3]; /* ht[2] for array [MINTAB] */
+    SHARED hstats_t stats;
+    SHARED void **hp;
+    SHARED mem_pool_t *mpool;
+    SHARED unsigned long node_expiry_in_ms_reset_val; /* if > 0, reset node->expire */
+    SHARED unsigned long nmht,
+                         ncmp;
+    SHARED unsigned long nkey,
+                         npos,
+                         nseat; /* nseat = 2*npos = 4*nkey */
+
+
+
+    SHARED void *teststr;
+    SHARED unsigned long teststr_num;
+};
+
+typedef struct {
+    volatile hv_t v;
+    unsigned long expiry_in_ms; /* expire in ms # of `gettimeofday`(2), 0 = never */
+    void *data;
+} node_t;
+
+
+/* -- 'Aliases' / 'Fct-like' macros -- */
+#define MEMWORD                 __attribute__((aligned(sizeof(void*))))
+
+#define ATOMIC_ADD1(V)          __sync_fetch_and_add(&(V), 1)
+#define ATOMIC_SUB1(V)          __sync_fetch_and_sub(&(V), 1)
+#define ADD1(V)                 __sync_fetch_and_add(&(V), 1)
+#define CAS(DST, OLD, NEW)      __sync_bool_compare_and_swap((DST), (OLD), (NEW))
+
+#if defined(__i386__) || defined(__x86_64__)
+#  define PAUSE() do { __asm__("pause"); } while(0)
+#else
+#  include <unistd.h>
+#  define PAUSE() do { usleep(1); } while(0)
 #endif
 
-#define NMHT 2
-#define NCLUSTER 4
-#define NSEAT (NMHT*NKEY*NCLUSTER)
-#define NNULL 0xFFFFFFFF
-#define MAXTAB NNULL
-#define MINTAB 64
-#define COLLISION 1000 /* 0.01 ~> avg 25 in seat */
-#define MAXBLOCKS 1024
-#define MAXSPIN (1<<20) /* 2^20 loops 40ms with pause + sched_yield on xeon E5645 */
-
-#define memword __attribute__((aligned(sizeof(void *))))
-#define atomic_add1(v) __sync_fetch_and_add(&(v), 1)
-#define atomic_sub1(v) __sync_fetch_and_sub(&(v), 1)
-#define add1(v) __sync_fetch_and_add(&(v), 1)
-#define cas(dst, old, new) __sync_bool_compare_and_swap((dst), (old), (new))
-#define ip(mp, type, i) (((type *)(mp->ba[(i) >> mp->shift]))[(i) & mp->mask])
-#define i2p(mp, type, i) (i == NNULL ? NULL : &(ip(mp, type, i)))
-//#define unhold_bucket(hv, v) do { if ((hv).y && !(hv).x) (hv).x = (v).x; } while(0)
-#define unhold_bucket(hv, v) while ((hv).y && !cas (&(hv).x, 0, (v).x))
-#define hold_bucket_otherwise_return_0(hv, v) do { unsigned long __l = MAXSPIN; \
-          while (!cas(&(hv).x, (v).x, 0)) { /* when CAS fails */ \
-            if ((hv).x != (v).x) return 0; /* already released or reused */\
-            while ((hv).x == 0) { /* wait for unhold */ \
-              if ((hv).y == 0) return 0; /* no unhold but released */ \
-              if (--__l == 0) { add1 (h->stats.escapes); return 0; } /* give up */ \
-              if (__l & 0x0f) __asm__("pause"); else sched_yield(); /*alt: usleep(1)*/ \
-          }} \
-          if ((hv).y != (v).y || (hv).y == 0) { unhold_bucket (hv, v); return 0; } \
-          } while (0)
+#define IP(MP, TYPE, I)         (((TYPE*)((MP)->ba[(I) >> (MP)->shift]))[(I) & (MP)->mask])
+#define I2P(MP, TYPE, I)        (NNULL == (I) ? NULL : &(IP(MP, TYPE, I)))
+//#define UNHOLD_BUCKET(HV, V)    do { if ((HV).y && !(HV).x) (HV).x = (V).x; } while(0)
+#define UNHOLD_BUCKET(HV, V)    while ((HV).y && !CAS (&(HV).x, 0, (V).x))
+#define HOLD_BUCKET_OTHERWISE_RETURN_0(HMAP, HV, V) do { unsigned long __l = MAXSPIN; \
+    while (!CAS(&(HV).x, (V).x, 0)) { /* when CAS fails */ \
+        if ((HV).x != (V).x) return 0; /* already released or reused */\
+        while ((HV).x == 0) { /* wait for unhold */ \
+            if ((HV).y == 0) return 0; /* no unhold but released */ \
+            if (--__l == 0) { ADD1 ((HMAP)->stats.escapes); return 0; } /* give up */ \
+            if (__l & 0x0f) PAUSE(); else sched_yield(); \
+        } \
+    } \
+    if ((HV).y != (V).y || (HV).y == 0) { UNHOLD_BUCKET (HV, V); return 0; } \
+    } while (0)
 
 
-inline unsigned long
-nowms ()
-{
-  struct timeval tv;
-  gettimeofday (&tv, NULL);
-  return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
+/* --  Debugging macros  -- */
+// #define PRINT_DEBUG_MSGS
+#ifdef PRINT_DEBUG_MSGS
+#  define PRINT_DEBUG_MSG(FMT, ...) do { printf(FMT, ##__VA_ARGS__); } while(0)
+#else
+#  define PRINT_DEBUG_MSG(FMT, ...) do { } while(0)
+#endif
+
+
+
+/* -- Functions -- */
+static inline unsigned long gettime_in_ms (void) {
+    struct timeval tv;
+    gettimeofday (&tv, NULL);
+    return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
 }
 
-mem_pool_t *
-create_mem_pool (unsigned int max_nodes, unsigned int node_size)
-{
-  unsigned int pwr2_max_nodes, pwr2_node_size, pwr2_total_size, pwr2_block_size;
-  mem_pool_t *pmp;
+/* -------------------- -------------------- -------------------- -------------------- -------------------- */
+static mem_pool_t *mem_pool_create (unsigned int max_nodes, unsigned int node_size) {
+    unsigned int pwr2_max_nodes;
+    for (pwr2_max_nodes = 0; (1u << pwr2_max_nodes) < max_nodes; pwr2_max_nodes++);
+    if (pwr2_max_nodes == 0 || pwr2_max_nodes > 32) { /* auto resize for exception, use 1MB as mem index and 1MB block size*/
+        pwr2_max_nodes = 32;
+    }
+
+    unsigned int pwr2_node_size;
+    for (pwr2_node_size = 0; (1u << pwr2_node_size) < node_size; pwr2_node_size++);
+    if ((1u << pwr2_node_size) != node_size || pwr2_node_size < 5 || pwr2_node_size > 12) {
+        PRINT_DEBUG_MSG("node_size should be N power of 2, 5 <= N <= 12(4KB page)");
+        return NULL;
+    }
 
 #define PW2_MAX_BLK_PTR 9   /* hard code one 4K-page for max 512 block pointers */
 #define PW2_MIN_BLK_SIZ 12  /* 2^12 = 4K page size */
+    const unsigned int pwr2_total_size = pwr2_max_nodes + pwr2_node_size,
+                       pwr2_block_size = (pwr2_total_size <= PW2_MAX_BLK_PTR + PW2_MIN_BLK_SIZ) ? (PW2_MIN_BLK_SIZ) : (pwr2_total_size - PW2_MAX_BLK_PTR);
 
-  for (pwr2_max_nodes = 0; (1 << pwr2_max_nodes) < max_nodes; pwr2_max_nodes++);
-  if (pwr2_max_nodes == 0 || pwr2_max_nodes > 32) /* auto resize for exceeption, use 1MB as mem index and 1MB block size*/
-    pwr2_max_nodes = 32;
+    mem_pool_t *mpool;
+    if (posix_memalign ((void **) (&mpool), 64, sizeof (*mpool))) {
+        return NULL;
+    }
+    memset(mpool, 0, sizeof(*mpool));
 
-  for (pwr2_node_size = 0; (1 << pwr2_node_size) < node_size; pwr2_node_size++);
-  if ((1 << pwr2_node_size) != node_size || pwr2_node_size < 5 || pwr2_node_size > 12)
-    {
-      printf("node_size should be N powe of 2, 5 <= N <= 12(4KB page)");
-      return NULL;
+    mpool->max_blocks =   (nid_t)(1 << (PW2_MAX_BLK_PTR));
+    mpool->node_size =    (nid_t)(1 << pwr2_node_size);
+    mpool->blk_size =     (nid_t)(1 << pwr2_block_size);
+    mpool->blk_node_num = (nid_t)(1 << (pwr2_block_size - pwr2_node_size));
+    mpool->shift =        (nid_t)pwr2_block_size - pwr2_node_size;
+    mpool->mask =         (nid_t)((1 << mpool->shift) - 1);
+    mpool->cur_blocks =   0;
+
+    if (!posix_memalign ((void **) (&mpool->ba), 64, mpool->max_blocks * sizeof (*mpool->ba))) {
+        memset (mpool->ba, 0, mpool->max_blocks * sizeof (*mpool->ba));
+        return mpool;
     }
 
-  if (posix_memalign ((void **) (&pmp), 64, sizeof (*pmp)))
+    free(mpool);
     return NULL;
-  memset (pmp, 0, sizeof (*pmp));
+}
 
-  pwr2_total_size = pwr2_max_nodes + pwr2_node_size;
-  if (pwr2_total_size <= PW2_MAX_BLK_PTR + PW2_MIN_BLK_SIZ)
-    pwr2_block_size = PW2_MIN_BLK_SIZ;
-  else
-    pwr2_block_size = pwr2_total_size - PW2_MAX_BLK_PTR;
-
-  pmp->max_blocks = (nid) (1 << (PW2_MAX_BLK_PTR));
-  pmp->node_size = (nid) (1 << pwr2_node_size);
-  pmp->blk_size = (nid) (1 << pwr2_block_size);
-  pmp->blk_node_num = (nid) (1 << (pwr2_block_size - pwr2_node_size));
-  pmp->shift = (nid) pwr2_block_size - pwr2_node_size;
-  pmp->mask = (nid) ((1 << pmp->shift) - 1);
-  pmp->curr_blocks = 0;
-
-  if (!posix_memalign ((void **) (&pmp->ba), 64, pmp->max_blocks * sizeof (*pmp->ba)))
-    {
-      memset (pmp->ba, 0, pmp->max_blocks * sizeof (*pmp->ba));
-      return pmp;
+static int mem_pool_destroy(mem_pool_t *mpool) {
+    if (!mpool) {
+        return -1;
     }
-  free (pmp);
-  return NULL;
-}
 
-
-int
-destroy_mem_pool (mem_pool_t * pmp)
-{
-  unsigned long i;
-  if (!pmp)
-    return -1;
-  for (i = 0; i < pmp->max_blocks; i++)
-    if (pmp->ba[i])
-      {
-	free (pmp->ba[i]);
-	pmp->ba[i] = NULL;
-	pmp->curr_blocks--;
-      }
-  free (pmp->ba);
-  pmp->ba = NULL;
-  free (pmp);
-  return 0;
-}
-
-inline nid *
-new_mem_block (mem_pool_t * pmp, volatile cas_t * recv_queue)
-{
-  nid i, m, sz, sft, head = 0;
-  memword cas_t n, x, *pn;
-  void *p;
-
-  if (!pmp || !(p = calloc (pmp->blk_node_num, pmp->node_size)))
-    return NULL;
-  for (i = pmp->curr_blocks; i < pmp->max_blocks; i++)
-    if (cas (&pmp->ba[i], NULL, p))
-      {
-        atomic_add1 (pmp->curr_blocks);
-        break;
-      }
-  if (i == pmp->max_blocks)
-    {
-      free (p);
-      return NULL;
+    for (unsigned long i = 0; i < mpool->max_blocks; i++) {
+        if (mpool->ba[i]) {
+            free(mpool->ba[i]);
+            mpool->ba[i] = NULL;
+            mpool->cur_blocks--;
+        }
     }
-  sz = pmp->node_size;
-  sft = pmp->shift;
-  m = pmp->mask;
-  head = i * (m + 1);
-  for (i = 0; i < m; i++)
-    *(nid *) (p + i * sz) = head + i + 1;
-  pn = (cas_t *) (p + m * sz);
-  pn->mi = NNULL;
-  pn->rfn = 0;
-  x.mi = head;
-  do
-    {
-      n.all = recv_queue->all;
-      pn->mi = n.mi;
-      x.rfn = n.rfn + 1;
+
+    free(mpool->ba);
+    mpool->ba = NULL;
+    free(mpool);
+
+    return 0;
+}
+
+static inline nid_t *mem_block_new (mem_pool_t *mpool, volatile cas_t *recv_queue) {
+
+    void *p = calloc (mpool->blk_node_num, mpool->node_size);
+    if (!mpool || !p) {         // TODO: mpool should be `assert`
+        return NULL;
     }
-  while (!cas (&recv_queue->all, n.all, x.all));
-  return (nid *) (p + m * sz);
+
+    nid_t cur_block;
+    for (cur_block = mpool->cur_blocks; cur_block < mpool->max_blocks; cur_block++) {
+        if (CAS (&mpool->ba[cur_block], NULL, p)) {
+            ATOMIC_ADD1 (mpool->cur_blocks);
+            break;
+        }
+    }
+
+    if (cur_block == mpool->max_blocks) {
+        free(p);
+        return NULL;
+    }
+
+    nid_t mpool_node_size = mpool->node_size,
+          mpool_mask = mpool->mask,
+          head = cur_block * (mpool_mask + 1);
+    for (nid_t i = 0; i < mpool_mask; i++) {
+        *(nid_t*) ((char*)p + i * mpool_node_size) = head + i + 1;
+    }
+
+    MEMWORD cas_t *pn = (cas_t*) ((char*)p + mpool_mask * mpool_node_size);
+    pn->cas.mi =  NNULL;
+    pn->cas.rfn = 0;
+    MEMWORD cas_t n,
+                  x;
+    x.cas.mi = head;
+    do {
+        n.all = recv_queue->all;
+        pn->cas.mi = n.cas.mi;
+        x.cas.rfn = n.cas.rfn + 1;
+    } while (!CAS (&recv_queue->all, n.all, x.all));
+
+    return (nid_t*) ((char*)p + mpool_mask * mpool_node_size);
 }
 
-int default_func_reset_ttl (void *hash_data, void *return_data)
-{
-  if (return_data)
-    *((void **)return_data) = hash_data;
-  return PLEASE_SET_TTL_TO_DEFAULT;
+/* Default hooks */
+static int default_cb_reset_ttl (void *hash_data, void *return_data) {
+    if (return_data) {
+        *((void **)return_data) = hash_data;
+    }
+    return HOOK_TTL_RESET;
 }
 
-/* define your own func to return different ttl or removval instructions */
-int default_func_not_change_ttl (void *hash_data, void *return_data)
-{
-  if (return_data)
-    *((void **)return_data) = hash_data;
-  return PLEASE_DO_NOT_CHANGE_TTL; 
+/* define your own func to return different ttl or removal instructions */
+static int default_cb_ttl_no_change (void *hash_data, void *return_data) {
+    if (return_data) {
+        *((void **)return_data) = hash_data;
+    }
+    return HOOK_TTL_DONT_CHANGE;
 }
 
-int default_func_remove_node (void *hash_data, void *return_data)
-{
-  if (return_data)
-    *((void **)return_data) = hash_data;
-  return PLEASE_REMOVE_HASH_NODE;
+static int default_cb_remove_node (void *hash_data, void *return_data) {
+    if (return_data) {
+        *((void **)return_data) = hash_data;
+    }
+    return HOOK_NODE_REMOVE;
 }
 
-int
-init_htab (htab_t * ht, unsigned long num, double ratio)
-{
-  unsigned long i, nb;
-  double r;
-  nb = num * ratio;
-  for (i = 134217728; nb > i; i *= 2);
+static int htab_init (htab_t *ht, unsigned long num, double ratio) {
+    unsigned long i,
+                  nb = num * ratio;
+    for (i = 134217728; nb > i; i *= 2);
+
 //  nb = (nb >= 134217728) ? i : nb; // improve folding for more than 1/32 of MAXTAB (2^32)
-  ht->nb = (i > MAXTAB) ? MAXTAB : ((nb < MINTAB) ? MINTAB : nb);
-  ht->n = num; //if 3rd tab: n <- 0, nb <- MINTAB, r <- COLLISION
-  r = (ht->n == 0 ? ratio : ht->nb * 1.0 / ht->n);
-  if (!(ht->b = calloc (ht->nb, sizeof (*ht->b))))
-    return -1;
-  for (i = 0; i < ht->nb; i++)
-    ht->b[i] = NNULL;
-#ifdef DEBUG
-  printf ("expected nb[%ld] = n[%ld] * r[%f]\n", (unsigned long) (num * ratio),
-	  num, ratio);
-  printf ("actual   nb[%ld] = n[%ld] * r[%f]\n", ht->nb, ht->n, r);
-#endif
-  return 0;
+    ht->nb = (i > MAXTAB) ? MAXTAB : ((nb < MINTAB) ? MINTAB : nb);
+    ht->n =  num; //if 3rd tab: n <- 0, nb <- MINTAB, r <- COLLISION
+
+    if (!(ht->b = calloc (ht->nb, sizeof (*ht->b)))) {
+        return -1;
+    }
+
+    for (i = 0; i < ht->nb; i++) {
+        ht->b[i] = NNULL;
+    }
+
+    PRINT_DEBUG_MSG("expected nb[%lu] = n[%lu] * r[%f]\n", (unsigned long) (num * ratio),
+                    num, ratio);
+    PRINT_DEBUG_MSG("actual   nb[%lu] = n[%lu] * r[%f]\n", ht->nb, ht->n,
+                    (0 == ht->n ? ratio : ht->nb * 1.0 / ht->n));
+
+    return 0;
 }
 
-hash_t *
-atomic_hash_create (unsigned int max_nodes, int reset_ttl)
-{
-  const double collision = COLLISION;	/* collision control, larger is better */
-  hash_t *h;
-  htab_t *ht1, *ht2, *at1;	/* bucket array 1, 2 and collision array */
-  double K, r1, r2;
-  unsigned long j, n1, n2;
-  if (max_nodes < 2 || max_nodes > MAXTAB)
-    {
-      printf ("max_nodes range: 2 ~ %ld\n", (unsigned long) MAXTAB);
-      return NULL;
+
+hmap_t *atomic_hash_create (unsigned int max_nodes, int reset_ttl) {
+    if (max_nodes < 2 || max_nodes > MAXTAB) {
+        PRINT_DEBUG_MSG("max_nodes range: 2 ~ %lu\n", (unsigned long) MAXTAB);
+        return NULL;
     }
-  if (posix_memalign ((void **) (&h), 64, sizeof (*h)))
-    return NULL;
-  memset (h, 0, sizeof (*h));
 
 
-#if defined (MPQ3HASH)
-#include "hash_mpq.h"
-  init_crypt_table (ct);
-  h->hash_func = mpq3hash;
-#elif defined (NEWHASH)
-#include "hash_newhash.h"
-  h->hash_func = newhash;
-#elif defined (MD5HASH)
-#include "hash_md5.h"
-  h->hash_func = md5hash;
-#elif defined (MURMUR3HASH_128)
-#include "hash_murmur3.h"
-  h->hash_func = MurmurHash3_x64_128;
-#elif defined (CITY3HASH_128)
-#include "hash_city.h"
-  h->hash_func = cityhash_128;
+    hmap_t *hmap;
+    if (posix_memalign ((void**) (&hmap), 64, sizeof(*hmap))) {
+        return NULL;
+    }
+    memset(hmap, 0, sizeof(*hmap));
+
+#if HASH_FUNCTION == CITY3HASH_128
+#  include <hash_city.h>
+    hmap->hash_func = cityhash_128;
+    (void)(NEWHASH);
+    (void)(MPQ3HASH);
+#elif HASH_FUNCTION == MPQ3HASH
+#  include "hash_functions/hash_mpq.h"
+  uint32_t ct[0x500];
+  init_crypt_table(ct);
+  hmap->hash_func = mpq3hash;
+#elif HASH_FUNCTION == NEWHASH
+#  include <hash_newhash.h>
+   hmap->hash_func = newhash;
+#elif HASH_FUNCTION == MURMUR3HASH_128
+#  include <hash_murmur3.h>
+    hmap->hash_func = MurmurHash3_x64_128;
+#else
+#  error "atomic_hash: No hash function has been selected!"
 #endif
-  h->on_ttl = default_func_remove_node;
-  h->on_del = default_func_remove_node;
-  h->on_add = default_func_not_change_ttl;
-  h->on_get = default_func_not_change_ttl;
-  h->on_dup = default_func_reset_ttl;
-  h->reset_expire = reset_ttl;
-  h->nmht = NMHT;
-  h->ncmp = NCMP;
-  h->nkey = NKEY;		/* uint32_t # of hash function's output */
-  h->npos = h->nkey * NCLUSTER;	/* pos # in one hash table */
-  h->nseat = h->npos * h->nmht;	/* pos # in all hash tables */
-  h->freelist.mi = NNULL;
 
-  ht1 = &h->ht[0];
-  ht2 = &h->ht[1];
-  at1 = &h->ht[NMHT];
+    hmap->cb_on_ttl =       default_cb_remove_node;
+    hmap->cb_on_del =       default_cb_remove_node;
+    hmap->cb_on_add =       default_cb_ttl_no_change;
+    hmap->cb_on_get =       default_cb_ttl_no_change;
+    hmap->cb_on_dup =       default_cb_reset_ttl;
+
+    hmap->node_expiry_in_ms_reset_val = reset_ttl;
+    hmap->nmht =            NMHT;
+    hmap->ncmp =            NCMP;
+    hmap->nkey =            NKEY;   /* uint32_t # of hash function's output */
+    hmap->npos =            hmap->nkey * NCLUSTER; /* pos # in one hash table */
+    hmap->nseat =           hmap->npos * hmap->nmht; /* pos # in all hash tables */
+    hmap->freelist.cas.mi = NNULL;
+
+
+    htab_t *hmap_ht1 = &hmap->ht[0],            /* bucket array 1, 2 and collision array */
+           *hmap_ht2 = &hmap->ht[1],
+           *hmap_at1 = &hmap->ht[NMHT];
+
 /* n1 -> n2 -> 1/tuning
  * nb1 = n1 * r1, r1 = ((n1+2)/tuning/K^2)^(K^2 - 1)
  * nb2 = n2 * r2 == nb1 / K == ((n2+2)/tuning/K))^(K - 1)
-*/
-  printf ("init bucket array 1:\n");
-  K = h->npos + 1;
-  n1 = max_nodes;
-  r1 = pow ((n1 * collision / (K * K)), (1.0 / (K * K - 1)));
-  if (init_htab (ht1, n1, r1) < 0)
-    goto calloc_exit;
+ */
+    PRINT_DEBUG_MSG("init bucket array 1:\n");
+    const double collision = COLLISION; /* collision control, larger is better */
+    const double K = hmap->npos + 1;
+    const unsigned long n1 = max_nodes;
+    const double r1 = pow ((n1 * collision / (K * K)), (1.0 / (K * K - 1)));
+    if (htab_init(hmap_ht1, n1, r1) < 0) {
+        goto calloc_exit;
+    }
 
-  printf ("init bucket array 2:\n");
-  n2 = (n1 + 2.0) / (K * pow (r1, K - 1));
-  r2 = pow (((n2 + 2.0) * collision / K), 1.0 / (K - 1));
-  if (init_htab (ht2, n2, r2) < 0)
-    goto calloc_exit;
+    PRINT_DEBUG_MSG("init bucket array 2:\n");
+    const unsigned long n2 = (n1 + 2.0) / (K * pow (r1, K - 1));
+    const double r2 = pow (((n2 + 2.0) * collision / K), 1.0 / (K - 1));
+    if (htab_init(hmap_ht2, n2, r2) < 0) {
+        goto calloc_exit;
+    }
 
-  printf ("init collision array:\n");
-  if (init_htab (at1, 0, collision) < 0)
-    goto calloc_exit;
+    PRINT_DEBUG_MSG("init collision array:\n");
+    if (htab_init(hmap_at1, 0, collision) < 0) {
+        goto calloc_exit;
+    }
 
-  h->mp = create_mem_pool (max_nodes, sizeof (node_t));
-//  h->mp = old_create_mem_pool (ht1->nb + ht2->nb + at1->nb, sizeof (node_t), max_blocks);
-  printf ("shift=%d; mask=%d\n", h->mp->shift, h->mp->mask);
-  printf ("mem_blocks:\t%d/%d, %dx%d bytes, %d bytes per block\n", h->mp->curr_blocks, h->mp->max_blocks,
-          h->mp->blk_node_num, h->mp->node_size, h->mp->blk_size);
-  if (!h->mp)
-    goto calloc_exit;
+    hmap->mpool = mem_pool_create(max_nodes, sizeof(node_t));
+//  hmap->mp = old_create_mem_pool (hmap_ht1->nb + hmap_ht2->nb + hmap_at1->nb, sizeof (node_t), max_blocks);
+    PRINT_DEBUG_MSG("shift=%u; mask=%u\n", hmap->mpool->shift, hmap->mpool->mask);
+    PRINT_DEBUG_MSG("mem_blocks:\t%u/%u, %ux%u bytes, %u bytes per block\n", hmap->mpool->cur_blocks, hmap->mpool->max_blocks,
+                    hmap->mpool->blk_node_num, hmap->mpool->node_size, hmap->mpool->blk_size);
+    if (!hmap->mpool) {
+        goto calloc_exit;
+    }
 
-  h->stats.max_nodes = h->mp->max_blocks * h->mp->blk_node_num;
-  h->stats.mem_htabs = ((ht1->nb + ht2->nb) * sizeof (nid)) >> 10;
-  h->stats.mem_nodes = (h->stats.max_nodes * h->mp->node_size) >> 10;
-  return h;
+    hmap->stats.max_nodes = hmap->mpool->max_blocks * hmap->mpool->blk_node_num;
+    hmap->stats.mem_htabs = ((hmap_ht1->nb + hmap_ht2->nb) * sizeof (nid_t)) >> 10;
+    hmap->stats.mem_nodes = (hmap->stats.max_nodes * hmap->mpool->node_size) >> 10;
+    return hmap;
+
 
 calloc_exit:
-  for (j = 0; j < h->nmht; j++)
-    if (h->ht[j].b)
-      free (h->ht[j].b);
-  destroy_mem_pool (h->mp);
-  free (h);
-  return NULL;
+    for (unsigned long j = 0; j < hmap->nmht; j++) {
+        if (hmap->ht[j].b) {
+            free (hmap->ht[j].b);
+        }
+    }
+    mem_pool_destroy(hmap->mpool);
+    free (hmap);
+
+    return NULL;
 }
 
-int
-atomic_hash_stats (hash_t * h, unsigned long escaped_milliseconds)
-{
-  const hstats_t *t = &h->stats;
-  const htab_t *ht1 = &h->ht[0], *ht2 = &h->ht[1];
-  htab_t *p;
-  mem_pool_t *m = h->mp;
-  unsigned long j, nadd, ndup, nget, ndel, nop, ncur, op = 0;
-  double blk_in_kB, mem, d = 1024.0;
-  char *b = "    ";
-  blk_in_kB = m->blk_size / d;
-  mem = m->curr_blocks * blk_in_kB;
-#ifdef DEBUG
-  printf ("mem=%.2f, blk_in_kB=%.2f, curr_block=%u, blk_nod_num=%u, node_size=%u\n",
-           mem, blk_in_kB, m->curr_blocks, m->blk_node_num, m->node_size);
-#endif
-  printf ("\n");
-  printf ("mem_blocks:\t%u/%u, %ux%u bytes, %.2f MB per block\n", m->curr_blocks, m->max_blocks,
-          m->blk_node_num, m->node_size, m->blk_size/1048576.0);
-  printf ("mem_to_max:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
-	  t->mem_htabs / d, t->mem_nodes / d, (t->mem_htabs + t->mem_nodes) / d);
-  printf ("mem_in_use:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
-	  t->mem_htabs / d, mem / d, (t->mem_htabs + mem) / d);
-  printf ("n1[%ld]/n2[%ld]=[%.3f],  nb1[%ld]/nb2[%ld]=[%.2f]\n",
-	  ht1->n, ht2->n, ht1->n * 1.0 / ht2->n, ht1->nb, ht2->nb,
-	  ht1->nb * 1.0 / ht2->nb);
-  printf ("r1[%f]/r2[%f],  performance_wall[%.1f%%]\n",
-	  ht1->nb * 1.0 / ht1->n, ht2->nb * 1.0 / ht2->n,
-	  ht1->n * 100.0 / (ht1->nb + ht2->nb));
-  nop = ncur = nadd = ndup = nget = ndel = 0;
-  printf ("---------------------------------------------------------------------------\n");
-  printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", b, b, b, b, b, b, b, b);
-  for (j = 0; j <= NMHT && (p = &h->ht[j]); j++)
-    {
-      ncur += p->ncur;
-      nadd += p->nadd;
-      ndup += p->ndup;
-      nget += p->nget;
-      ndel += p->ndel;
-      printf ("%-4ld%-14ld%-14ld%-14ld%-14ld%-14ld\n", j, p->ncur, p->nadd, p->ndup, p->nget, p->ndel);
+int atomic_hash_stats (hmap_t *hmap, unsigned long escaped_milliseconds) {
+    static const char* const log_delim = "    ";
+
+    const hstats_t *hmap_stats = &hmap->stats;
+    const htab_t *hmap_ht1 = &hmap->ht[0],
+                 *hmap_ht2 = &hmap->ht[1];
+    mem_pool_t *hmap_mpool = hmap->mpool;
+
+    double d =         1024.0,
+           blk_in_kB = hmap_mpool->blk_size / d,
+           mem =       hmap_mpool->cur_blocks * blk_in_kB;
+
+    printf("mem=%.2f, blk_in_kB=%.2f, curr_block=%u, blk_nod_num=%u, node_size=%u\n",
+           mem, blk_in_kB, hmap_mpool->cur_blocks, hmap_mpool->blk_node_num, hmap_mpool->node_size);
+    printf ("\n");
+    printf ("mem_blocks:\t%u/%u, %ux%u bytes, %.2f MB per block\n", hmap_mpool->cur_blocks, hmap_mpool->max_blocks,
+            hmap_mpool->blk_node_num, hmap_mpool->node_size, hmap_mpool->blk_size / 1048576.0);
+    printf ("mem_to_max:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
+            hmap_stats->mem_htabs / d, hmap_stats->mem_nodes / d, (hmap_stats->mem_htabs + hmap_stats->mem_nodes) / d);
+    printf ("mem_in_use:\thtabs[%.2f]MB, nodes[%.2f]MB, total[%.2f]MB\n",
+            hmap_stats->mem_htabs / d, mem / d, (hmap_stats->mem_htabs + mem) / d);
+    printf ("n1[%lu]/n2[%lu]=[%.3f],  nb1[%lu]/nb2[%lu]=[%.2f]\n",
+            hmap_ht1->n, hmap_ht2->n, hmap_ht1->n * 1.0 / hmap_ht2->n, hmap_ht1->nb, hmap_ht2->nb,
+            hmap_ht1->nb * 1.0 / hmap_ht2->nb);
+    printf ("r1[%f]/r2[%f],  performance_wall[%.1f%%]\n",
+            hmap_ht1->nb * 1.0 / hmap_ht1->n, hmap_ht2->nb * 1.0 / hmap_ht2->n,
+            hmap_ht1->n * 100.0 / (hmap_ht1->nb + hmap_ht2->nb));
+    printf ("---------------------------------------------------------------------------\n");
+    printf ("tab n_cur %s%sn_add %s%sn_dup %s%sn_get %s%sn_del\n", log_delim, log_delim, log_delim, log_delim, log_delim, log_delim, log_delim, log_delim);
+
+    htab_t *htab;
+    unsigned long ncur = 0,
+                  nadd = 0,
+                  ndup = 0,
+                  nget = 0,
+                  ndel = 0;
+    for (unsigned long j = 0; j <= NMHT && (htab = &hmap->ht[j]); j++) {
+        ncur += htab->ncur;
+        nadd += htab->nadd;
+        ndup += htab->ndup;
+        nget += htab->nget;
+        ndel += htab->ndel;
+        printf ("%-4lu%-14lu%-14lu%-14lu%-14lu%-14lu\n", j, htab->ncur, htab->nadd, htab->ndup, htab->nget, htab->ndel);
     }
-  op = ncur + nadd + ndup + nget + ndel + t->get_nohit + t->del_nohit + t->add_nosit + t->add_nomem + t->escapes;
-  printf ("sum %-14ld%-14ld%-14ld%-14ld%-14ld\n", ncur, nadd, ndup, nget, ndel);
-  printf ("---------------------------------------------------------------------------\n");
-  printf ("del_nohit %sget_nohit %sadd_nosit %sadd_nomem %sexpires %sescapes\n", b, b, b, b, b);
-  printf ("%-14ld%-14ld%-14ld%-14ld%-12ld%-12ld\n", t->del_nohit,
-	  t->get_nohit, t->add_nosit, t->add_nomem, t->expires, t->escapes);
-  printf ("---------------------------------------------------------------------------\n");
-  if (escaped_milliseconds > 0)
-    printf ("escaped_time=%.3fs, op=%ld, ops=%.2fM/s\n", escaped_milliseconds * 1.0 / 1000, op,
-	    (double) op / 1000.0 / escaped_milliseconds);
-  printf ("\n");
-  fflush (stdout);
-  return 0;
+    unsigned long op = ncur + nadd + ndup + nget + ndel + hmap_stats->get_nohit + hmap_stats->del_nohit + hmap_stats->add_nosit + hmap_stats->add_nomem + hmap_stats->escapes;
+
+    printf ("sum %-14lu%-14lu%-14lu%-14lu%-14lu\n", ncur, nadd, ndup, nget, ndel);
+    printf ("---------------------------------------------------------------------------\n");
+    printf ("del_nohit %sget_nohit %sadd_nosit %sadd_nomem %sexpires %sescapes\n", log_delim, log_delim, log_delim, log_delim, log_delim);
+    printf ("%-14lu%-14lu%-14lu%-14lu%-12lu%-12lu\n", hmap_stats->del_nohit,
+            hmap_stats->get_nohit, hmap_stats->add_nosit, hmap_stats->add_nomem, hmap_stats->expires, hmap_stats->escapes);
+    printf ("---------------------------------------------------------------------------\n");
+    if (escaped_milliseconds > 0) {
+        printf ("elapsed_time=%.3fs, op=%lu, ops=%.2fM/s\n", escaped_milliseconds * 1.0 / 1000, op,
+                (double) op / 1000.0 / escaped_milliseconds);
+    }
+    printf ("\n");
+
+    fflush (stdout);
+    return 0;
 }
 
-int
-atomic_hash_destroy (hash_t * h)
-{
-  unsigned int j;
-  if (!h)
-    return -1;
-  for (j = 0; j < h->nmht; j++)
-    free (h->ht[j].b);
-  destroy_mem_pool (h->mp);
-  free (h);
-  return 0;
+int atomic_hash_destroy (hmap_t *hmap) {
+    if (!hmap) {
+        return -1;
+    }
+
+    for (unsigned int j = 0; j < hmap->nmht; j++) {
+        free (hmap->ht[j].b);
+    }
+    mem_pool_destroy(hmap->mpool);
+    free (hmap);
+
+    return 0;
 }
 
-inline nid
-new_node (hash_t * h)
-{
-  memword cas_t n, m;
-  while (h->freelist.mi != NNULL || new_mem_block (h->mp, &h->freelist))
-    {
-      n.all = h->freelist.all;
-      if (n.mi == NNULL)
-	    continue;
-      m.mi = ((cas_t *) (i2p (h->mp, node_t, n.mi)))->mi;
-      m.rfn = n.rfn + 1;
-      if (cas (&h->freelist.all, n.all, m.all))
-        return n.mi;
+void atomic_hash_register_hooks(hmap_t *hmap,
+                                hook_t cb_on_ttl, hook_t cb_on_add, hook_t cb_on_dup, hook_t cb_on_get, hook_t cb_on_del) {
+    if (cb_on_ttl) {
+        hmap->cb_on_ttl = cb_on_ttl;
     }
-  add1 (h->stats.add_nomem);
-  return NNULL;
+    if (cb_on_add) {
+        hmap->cb_on_add = cb_on_add;
+    }
+    if (cb_on_dup) {
+        hmap->cb_on_dup = cb_on_dup;
+    }
+    if (cb_on_get) {
+        hmap->cb_on_get = cb_on_get;
+    }
+    if (cb_on_del) {
+        hmap->cb_on_del = cb_on_del;
+    }
 }
 
-inline void
-free_node (hash_t * h, nid mi)
-{
-  memword cas_t n, m;
-  cas_t *p = (cas_t *) (i2p (h->mp, node_t, mi));
-  p->rfn = 0;
-  m.mi = mi;
-  do
-    {
-      n.all = h->freelist.all;
-      m.rfn = n.rfn + 1;
-      p->mi = n.mi;
+
+/* -------------------- -------------------- -------------------- -------------------- -------------------- */
+static inline nid_t node_new (hmap_t *hmap) {
+    MEMWORD cas_t n,
+                  m;
+    while (hmap->freelist.cas.mi != NNULL || mem_block_new(hmap->mpool, &hmap->freelist)) {
+        n.all = hmap->freelist.all;
+        if (NNULL == n.cas.mi) {
+            continue;
+        }
+
+        m.cas.mi = ((cas_t*) (I2P (hmap->mpool, node_t, n.cas.mi)))->cas.mi;
+        m.cas.rfn = n.cas.rfn + 1;
+
+        if (CAS (&hmap->freelist.all, n.all, m.all)) {
+            return n.cas.mi;
+        }
     }
-  while (!cas (&h->freelist.all, n.all, m.all));
+
+    ADD1 (hmap->stats.add_nomem);
+    return NNULL;
 }
 
-inline void
-set_hash_node (node_t * p, hv v, void *data, unsigned long expire)
-{
-  p->v = v;
-  p->expire = expire;
-  p->data = data;
+static inline void node_free (hmap_t *hmap, nid_t mi) {
+    cas_t *p = (cas_t*) (I2P(hmap->mpool, node_t, mi));
+    p->cas.rfn = 0;
+
+    MEMWORD cas_t n,
+                  m;
+    m.cas.mi = mi;
+    do {
+        n.all = hmap->freelist.all;
+        m.cas.rfn = n.cas.rfn + 1;
+        p->cas.mi = n.cas.mi;
+    } while (!CAS (&hmap->freelist.all, n.all, m.all));
 }
 
-inline int
-likely_equal (hv w, hv v)
-{
-  return w.y == v.y;
+static inline void node_set (node_t *node, hv_t v, void *data, unsigned long expiry_in_ms) {
+    node->v = v;
+    node->expiry_in_ms = expiry_in_ms;
+    node->data = data;
 }
 
-/* only called in atomic_hash_get */
-inline int
-try_get (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn)
-{
-  hold_bucket_otherwise_return_0 (p->v, v);
-  if (*seat != mi)
-    {
-      unhold_bucket (p->v, v);
-      return 0;
-    }
-  int result = cbf ? cbf (p->data, rtn) : h->on_get (p->data, rtn);
-  if (result == PLEASE_REMOVE_HASH_NODE)
-    {
-      if (cas (seat, mi, NNULL))
-        atomic_sub1 (h->ht[idx].ncur);
-      memset (p, 0, sizeof (*p));
-      add1 (h->ht[idx].nget);
-      free_node (h, mi);
-      return 1;
-    }
-  if (result == PLEASE_SET_TTL_TO_DEFAULT)
-    result = h->reset_expire;
-  if (p->expire > 0 && result > 0)
-    p->expire = result + nowms ();  
-  unhold_bucket (p->v, v);
-  add1 (h->ht[idx].nget);
-  return 1;
+static inline int likely_equal (hv_t w, hv_t v) {
+    return w.y == v.y;
 }
 
-/* only called in atomic_hash_add */
-inline int
-try_dup (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn)
-{
-  hold_bucket_otherwise_return_0 (p->v, v);
-  if (*seat != mi)
-    {
-      unhold_bucket (p->v, v);
-      return 0;
+
+/* only called in `atomic_hash_get` */
+static inline int try_get (hmap_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_on_get, void *rtn) {
+    HOLD_BUCKET_OTHERWISE_RETURN_0 (hmap, node->v, v);
+    if (*seat != mi) {
+        UNHOLD_BUCKET (node->v, v);
+        return 0;
     }
-  int result = cbf ? cbf (p->data, rtn) : h->on_dup (p->data, rtn);
-  if (result == PLEASE_REMOVE_HASH_NODE)
-    {
-      if (cas (seat, mi, NNULL))
-        atomic_sub1 (h->ht[idx].ncur);
-      memset (p, 0, sizeof (*p));
-      add1 (h->ht[idx].ndup);
-      free_node (h, mi);
-      return 1;
+
+    int result = cb_on_get ? cb_on_get (node->data, rtn) : hmap->cb_on_get (node->data, rtn);
+    if (HOOK_NODE_REMOVE == result) {
+        if (CAS (seat, mi, NNULL)) {
+            ATOMIC_SUB1 (hmap->ht[idx].ncur);
+        }
+        memset (node, 0, sizeof (*node));
+        ADD1 (hmap->ht[idx].nget);
+        node_free(hmap, mi);
+        return 1;
     }
-  if (result == PLEASE_SET_TTL_TO_DEFAULT)
-    result = h->reset_expire;
-  if (p->expire > 0 && result > 0)
-    p->expire = result + nowms ();  
-  unhold_bucket (p->v, v);
-  add1 (h->ht[idx].ndup);
-  return 1;
+    if (HOOK_TTL_RESET == result) {
+        result = hmap->node_expiry_in_ms_reset_val;
+    }
+    if (node->expiry_in_ms > 0 && result > 0) {
+        node->expiry_in_ms = result + gettime_in_ms();
+    }
+
+    UNHOLD_BUCKET (node->v, v);
+    ADD1 (hmap->ht[idx].nget);
+    return 1;
 }
 
-/* only called in atomic_hash_add */
-inline int
-try_add (hash_t *h, node_t *p, nid *seat, nid mi, int idx, void *rtn)
-{
-  hvu x = p->v.x;
-  p->v.x = 0;
-  if (!cas (seat, NNULL, mi))
-    {
-      p->v.x = x;
-      return 0; /* other thread wins, caller to retry other seats */
+/* only called in `atomic_hash_add` */
+static inline int try_dup (hmap_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_on_dup, void *rtn) {
+    HOLD_BUCKET_OTHERWISE_RETURN_0 (hmap, node->v, v);
+    if (*seat != mi) {
+        UNHOLD_BUCKET (node->v, v);
+        return 0;
     }
-  atomic_add1 (h->ht[idx].ncur);
-  int result = h->on_add (p->data, rtn);
-  if (result == PLEASE_REMOVE_HASH_NODE)
-    {
-      if (cas (seat, mi, NNULL))
-        atomic_sub1 (h->ht[idx].ncur);
-      memset (p, 0, sizeof (*p));
-      free_node (h, mi);
-      return 1;	/* abort adding this node */
+
+    int result = cb_on_dup ? cb_on_dup (node->data, rtn) : hmap->cb_on_dup (node->data, rtn);
+    if (HOOK_NODE_REMOVE == result) {
+        if (CAS (seat, mi, NNULL)) {
+            ATOMIC_SUB1 (hmap->ht[idx].ncur);
+        }
+        memset (node, 0, sizeof (*node));
+        ADD1 (hmap->ht[idx].ndup);
+        node_free(hmap, mi);
+        return 1;
     }
-  if (result == PLEASE_SET_TTL_TO_DEFAULT)
-    result = h->reset_expire;
-  if (p->expire > 0 && result > 0)
-    p->expire = result + nowms ();  
-  p->v.x = x;
-  add1 (h->ht[idx].nadd);
-  return 1;
+    if (HOOK_TTL_RESET == result) {
+        result = hmap->node_expiry_in_ms_reset_val;
+    }
+    if (node->expiry_in_ms > 0 && result > 0) {
+        node->expiry_in_ms = result + gettime_in_ms();
+    }
+
+    UNHOLD_BUCKET (node->v, v);
+    ADD1 (hmap->ht[idx].ndup);
+    return 1;
+}
+
+/* only called in `atomic_hash_add` */
+static inline int try_add (hmap_t *hmap, node_t *node, nid_t *seat, nid_t mi, int idx, void *rtn) {
+    hvu_t x = node->v.x;
+    node->v.x = 0;
+    if (!CAS (seat, NNULL, mi)) {
+        node->v.x = x;
+        return 0; /* other thread wins, caller to retry other seats */
+    }
+
+    ATOMIC_ADD1 (hmap->ht[idx].ncur);
+    int result = hmap->cb_on_add (node->data, rtn);
+    if (HOOK_NODE_REMOVE == result) {
+        if (CAS (seat, mi, NNULL)) {
+            ATOMIC_SUB1 (hmap->ht[idx].ncur);
+        }
+        memset (node, 0, sizeof (*node));
+        node_free(hmap, mi);
+        return 1; /* abort adding this node */
+    }
+    if (HOOK_TTL_RESET == result) {
+        result = hmap->node_expiry_in_ms_reset_val;
+    }
+    if (node->expiry_in_ms > 0 && result > 0) {
+        node->expiry_in_ms = result + gettime_in_ms();
+    }
+
+    node->v.x = x;
+    ADD1 (hmap->ht[idx].nadd);
+    return 1;
 }
 
 /* only called in atomic_hash_del */
-inline int
-try_del (hash_t *h, hv v, node_t *p, nid *seat, nid mi, int idx,  hook cbf, void *rtn)
-{
-  hold_bucket_otherwise_return_0 (p->v, v);
-  if (*seat != mi || !cas (seat, mi, NNULL))
-    {
-      unhold_bucket (p->v, v);
-      return 0;
+static inline int try_del (hmap_t *hmap, hv_t v, node_t *node, nid_t *seat, nid_t mi, int idx, hook_t cb_fct, void *rtn) {
+    HOLD_BUCKET_OTHERWISE_RETURN_0 (hmap, node->v, v);
+    if (*seat != mi || !CAS (seat, mi, NNULL)) {
+        UNHOLD_BUCKET (node->v, v);
+        return 0;
     }
-  atomic_sub1 (h->ht[idx].ncur);
-  void *user_data = p->data;
-  memset (p, 0, sizeof (*p));
-  add1 (h->ht[idx].ndel);
-  free_node (h, mi);
-  if (cbf)
-    cbf (user_data, rtn);
-  else
-    h->on_del (user_data, rtn);
-  return 1;
+
+    ATOMIC_SUB1 (hmap->ht[idx].ncur);
+    void *user_data = node->data;
+    memset (node, 0, sizeof (*node));
+    ADD1 (hmap->ht[idx].ndel);
+    node_free(hmap, mi);
+
+    if (cb_fct) {
+        cb_fct (user_data, rtn);
+    } else {
+        hmap->cb_on_del (user_data, rtn);
+    }
+
+    return 1;
 }
 
-inline int
-valid_ttl (hash_t *h, unsigned long now, node_t *p, nid *seat, nid mi,
-	   int idx, nid *node_rtn, void *data_rtn)
-{
-  unsigned long expire = p->expire;
- /* valid state, quickly skip to call try_action. */
-  if (expire == 0 || expire > now)
-    return 1;
-  hv v = p->v;
-  /* hold on or removed by others, skip to call try_action */
-  if (v.x == 0 || v.y == 0)
-    return 1;
-  hold_bucket_otherwise_return_0 (p->v, v);
-  /* re-enter valid state, skip to call try_action */
-  if (p->expire == 0 || p->expire > now)
-    {
-      unhold_bucket (p->v, v);
-      return 1;
+static inline int valid_ttl (hmap_t *hmap, unsigned long cur_time_in_ms, node_t *node, nid_t *seat, nid_t mi,
+                             int idx, nid_t *node_rtn, void *data_rtn) {
+    unsigned long node_expiry_in_ms = node->expiry_in_ms;
+    /* valid state, quickly skip to call try_action. */
+    if (0 == node_expiry_in_ms || node_expiry_in_ms > cur_time_in_ms) {
+        return 1;
     }
-  /* expired,  now remove it */
-  if (*seat != mi || !cas (seat, mi, NNULL))
-    {
-     /* failed to remove. let others do it in the future, skip and go next pos */
-      unhold_bucket (p->v, v);
-      return 0;
+
+    hv_t v = node->v;
+    /* hold on or removed by others, skip to call try_action */
+    if (0 == v.x || 0 == v.y) {
+        return 1;
     }
-  atomic_sub1 (h->ht[idx].ncur);
-  void *user_data = p->data;
-  memset (p, 0, sizeof (*p));
-  add1 (h->stats.expires);
-  /* return this hash node for caller re-use */
-  /* strict version: if (!node_rtn || !cas(node_rtn, NNULL, mi)) */
-  if (node_rtn && *node_rtn == NNULL)
-    *node_rtn = mi;
-  else
-    free_node (h, mi);
-  if (h->on_ttl)
-    h->on_ttl (user_data, data_rtn);
-  return 0;
+
+    HOLD_BUCKET_OTHERWISE_RETURN_0 (hmap, node->v, v);
+    /* re-enter valid state, skip to call try_action */
+    if (0 == node->expiry_in_ms || node->expiry_in_ms > cur_time_in_ms) {
+        UNHOLD_BUCKET (node->v, v);
+        return 1;
+    }
+
+    /* expired,  cur_time_in_ms remove it */
+    if (*seat != mi || !CAS (seat, mi, NNULL)) {
+        /* failed to remove. let others do it in the future, skip and go next pos */
+        UNHOLD_BUCKET (node->v, v);
+        return 0;
+    }
+
+    ATOMIC_SUB1 (hmap->ht[idx].ncur);
+    void *user_data = node->data;
+    memset (node, 0, sizeof (*node));
+    ADD1 (hmap->stats.expires);
+    /* return this hash node for caller re-use */
+    /* strict version: if (!node_rtn || !CAS(node_rtn, NNULL, mi)) */
+    if (node_rtn && NNULL == *node_rtn) {
+        *node_rtn = mi;
+    } else {
+        node_free(hmap, mi);
+    }
+
+    if (hmap->cb_on_ttl) {
+        hmap->cb_on_ttl (user_data, data_rtn);
+    }
+
+    return 0;
 }
 
 /*Fibonacci number: 16bit->40543, 32bit->2654435769, 64bit->11400714819323198485 */
 #if NKEY == 4
-#define collect_hash_pos(d, a)  do { register htab_t *pt; i = 0;\
-  for (pt = &h->ht[0]; pt < &h->ht[NMHT]; pt++) { \
-    a[i++] = &pt->b[d[0] % pt->nb]; \
-    a[i++] = &pt->b[d[1] % pt->nb]; \
-    a[i++] = &pt->b[d[2] % pt->nb]; \
-    a[i++] = &pt->b[d[3] % pt->nb]; \
-    for (j = 1; j < NCLUSTER; j++) { \
-      a[i++] = &pt->b[(d[3] + j * d[0]) % pt->nb]; \
-      a[i++] = &pt->b[(d[0] + j * d[1]) % pt->nb]; \
-      a[i++] = &pt->b[(d[1] + j * d[2]) % pt->nb]; \
-      a[i++] = &pt->b[(d[2] + j * d[3]) % pt->nb]; \
-    } \
-  }}while (0)
+#define COLLECT_HASH_POS(HMAP, D, A)  do { register unsigned int __i = 0;\
+    for (register htab_t *pt = &(HMAP)->ht[0]; pt < &(HMAP)->ht[NMHT]; pt++) { \
+        (A)[__i++] = &pt->b[(D)[0] % pt->nb]; \
+        (A)[__i++] = &pt->b[(D)[1] % pt->nb]; \
+        (A)[__i++] = &pt->b[(D)[2] % pt->nb]; \
+        (A)[__i++] = &pt->b[(D)[3] % pt->nb]; \
+        for (register unsigned int __j = 1; __j < NCLUSTER; __j++) { \
+            (A)[__i++] = &pt->b[((D)[3] + __j * (D)[0]) % pt->nb]; \
+            (A)[__i++] = &pt->b[((D)[0] + __j * (D)[1]) % pt->nb]; \
+            (A)[__i++] = &pt->b[((D)[1] + __j * (D)[2]) % pt->nb]; \
+            (A)[__i++] = &pt->b[((D)[2] + __j * (D)[3]) % pt->nb]; \
+        } \
+    }}while (0)
+
 #elif NKEY == 3
-#define collect_hash_pos(d, a)  do { register htab_t *pt; i = 0;\
-  for (pt = &h->ht[0]; pt < &h->ht[NMHT]; pt++) { \
-    a[i++] = &pt->b[d[0] % pt->nb]; \
-    a[i++] = &pt->b[d[1] % pt->nb]; \
-    a[i++] = &pt->b[d[2] % pt->nb]; \
-    a[i++] = &pt->b[(d[2] + d[0]) % pt->nb]; \
-    a[i++] = &pt->b[(d[0] + d[1]) % pt->nb]; \
-    a[i++] = &pt->b[(d[1] + d[2]) % pt->nb]; \
-    a[i++] = &pt->b[(d[2] - d[0]) % pt->nb]; \
-    a[i++] = &pt->b[(d[0] - d[1]) % pt->nb]; \
-    a[i++] = &pt->b[(d[1] - d[2]) % pt->nb]; \
-  }}while (0)
-#endif
-/*
-#define collect_hash_pos(d, a)  do { register htab_t *pt; j = 0;\
-  for (pt = &h->ht[0]; pt < &h->ht[NMHT]; pt++){ \
-    for(i = 0; i < NKEY; i++) \
-      a[j++] = &pt->b[d[i] % pt->nb]; \
-    for(i = 0; i < NKEY; i++) \
-      a[j++] = &pt->b[(d[i] + d[(i+1)%NKEY]) % pt->nb]; \
-  }}while (0)
-*/
+#define COLLECT_HASH_POS(HMAP, D, A)  do { register unsigned int __i = 0;\
+    for (register htab_t *pt = &(HMAP)->ht[0]; pt < &(HMAP)->ht[NMHT]; pt++) { \
+        (A)[__i++] = &pt->b[(D)[0] % pt->nb]; \
+        (A)[__i++] = &pt->b[(D)[1] % pt->nb]; \
+        (A)[__i++] = &pt->b[(D)[2] % pt->nb]; \
+        (A)[__i++] = &pt->b[((D)[2] + (D)[0]) % pt->nb]; \
+        (A)[__i++] = &pt->b[((D)[0] + (D)[1]) % pt->nb]; \
+        (A)[__i++] = &pt->b[((D)[1] + (D)[2]) % pt->nb]; \
+        (A)[__i++] = &pt->b[((D)[2] - (D)[0]) % pt->nb]; \
+        (A)[__i++] = &pt->b[((D)[0] - (D)[1]) % pt->nb]; \
+        (A)[__i++] = &pt->b[((D)[1] - (D)[2]) % pt->nb]; \
+    }}while (0)
 
-#define idx(j) (j<(NCLUSTER*NKEY)?0:1)
-int
-atomic_hash_add (hash_t *h, void *kwd, int len, void *data,
-		 int init_ttl, hook cbf_dup, void *arg)
-{
-  register unsigned int i, j;
-  register nid mi;
-  register node_t *p;
-  memword nid *a[NSEAT];
-  memword union { hv v; nid d[NKEY]; } t;
-  nid ni = NNULL;
-  unsigned long now = nowms ();
+#endif /* NKEY */
 
-  if (len > 0)
-    h->hash_func (kwd, len, &t);
-  else if (len == 0)
-    memcpy (&t, kwd, sizeof(t));
-  else
-    return -3; /* key length not defined */
-  collect_hash_pos (t.d, a);
-  for (j = 0; j < NSEAT; j++)
-    if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-      if (valid_ttl (h, now, p, a[j], mi, idx (j), &ni, NULL))
-        if (likely_equal (p->v, t.v))
-          if (try_dup (h, t.v, p, a[j], mi, idx (j), cbf_dup, arg))
-            goto hash_value_exists;
-  for (i = h->ht[NMHT].ncur, j = 0; i > 0 && j < MINTAB; j++)
-    if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && i--)
-      if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, &ni, NULL))
-        if (likely_equal (p->v, t.v))
-          if (try_dup (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, cbf_dup, arg))
-            goto hash_value_exists;
-  if (ni == NNULL && (ni = new_node (h)) == NNULL)
-    return -2;	/* hash node exhausted */
-  p = i2p (h->mp, node_t, ni);
-  set_hash_node (p, t.v, data, (init_ttl > 0 ? init_ttl + now : 0));
-  for (j = 0; j < NSEAT; j++)
-    if (*a[j] == NNULL)
-      if (try_add (h, p, a[j], ni, idx (j), arg))
-        return 0;	/* hash value added */
-  if (h->ht[NMHT].ncur < MINTAB)
-    for (j = 0; j < MINTAB; j++)
-      if (h->ht[NMHT].b[j] == NNULL)
-        if (try_add (h, p, &h->ht[NMHT].b[j], ni, NMHT, arg))
-          return 0; /* hash value added */
-  memset (p, 0, sizeof (*p));
-  free_node (h, ni);
-  add1 (h->stats.add_nosit);
-  return -1; /* add but fail */
-  
+#define IDX(J) ((J) < (NCLUSTER * NKEY) ? 0 : 1)
+
+int atomic_hash_add (hmap_t *hmap, const void *kwd, int len, void *data,
+                     int init_ttl, hook_t cb_on_dup, void *arg) {
+    MEMWORD union { hv_t v; nid_t d[NKEY]; } t;
+    unsigned long cur_time_in_ms = gettime_in_ms();
+    if (len > 0) {
+        hmap->hash_func (kwd, len, &t);
+    } else if (0 == len) {
+        memcpy (&t, kwd, sizeof(t));
+    } else {
+        return -3; /* key length not defined */
+    }
+
+    MEMWORD nid_t *a[NSEAT];
+    COLLECT_HASH_POS (hmap, t.d, a);
+
+    nid_t ni = NNULL;
+    register nid_t mi;
+    register node_t *node;
+    for (register unsigned int j = 0; j < NSEAT; j++) {
+        if ((mi = *a[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi))) {
+            if (valid_ttl (hmap, cur_time_in_ms, node, a[j], mi, IDX (j), &ni, NULL)) {
+                if (likely_equal (node->v, t.v)) {
+                    if (try_dup (hmap, t.v, node, a[j], mi, IDX (j), cb_on_dup, arg)) {
+                        goto hash_value_exists;
+                    }
+                }
+            }
+        }
+    }
+
+    for (register unsigned int i = hmap->ht[NMHT].ncur,
+                               j = 0; i > 0 && j < MINTAB; j++) {
+        if ((mi = hmap->ht[NMHT].b[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi)) && i--) {
+            if (valid_ttl (hmap, cur_time_in_ms, node, &hmap->ht[NMHT].b[j], mi, NMHT, &ni, NULL)) {
+                if (likely_equal (node->v, t.v)) {
+                    if (try_dup (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_on_dup, arg)) {
+                        goto hash_value_exists;
+                    }
+                }
+            }
+        }
+    }
+
+    if (NNULL == ni && NNULL == (ni = node_new(hmap))) {
+        return -2;  /* hash node exhausted */
+    }
+
+    node = I2P (hmap->mpool, node_t, ni);
+    node_set(node, t.v, data, (init_ttl > 0 ? init_ttl + cur_time_in_ms : 0));
+
+    for (register unsigned int j = 0; j < NSEAT; j++) {
+        if (NNULL == *a[j]) {
+            if (try_add (hmap, node, a[j], ni, IDX (j), arg)) {
+                return 0; /* hash value added */
+            }
+        }
+    }
+
+    if (hmap->ht[NMHT].ncur < MINTAB) {
+        for (register unsigned int j = 0; j < MINTAB; j++) {
+            if (NNULL == hmap->ht[NMHT].b[j]) {
+                if (try_add (hmap, node, &hmap->ht[NMHT].b[j], ni, NMHT, arg)) {
+                    return 0; /* hash value added */
+                }
+            }
+        }
+    }
+
+    memset (node, 0, sizeof (*node));
+    node_free(hmap, ni);
+    ADD1 (hmap->stats.add_nosit);
+    return -1; /* add but fail */
+
 hash_value_exists:
-  if (ni != NNULL)
-    free_node (h, ni);
-  return 1; /* hash value exists */
+    if (ni != NNULL) {
+        node_free(hmap, ni);
+    }
+    return 1; /* hash value exists */
 }
 
-int
-atomic_hash_get (hash_t *h, void *kwd, int len, hook cbf, void *arg)
-{
-  register unsigned int i, j;
-  register nid mi;
-  register node_t *p;
-  memword nid *a[NSEAT];
-  memword union { hv v; nid d[NKEY]; } t;
-  unsigned long now = nowms ();
 
-  if (len > 0)
-    h->hash_func (kwd, len, &t);
-  else if (len == 0)
-    memcpy (&t, kwd, sizeof(t));
-  else
-    return -3; /* key length not defined */
-  collect_hash_pos (t.d, a);
-  for (j = 0; j < NSEAT; j++)
-    if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-      if (valid_ttl (h, now, p, a[j], mi, idx (j), NULL, NULL))
-	if (likely_equal (p->v, t.v))
-          if (try_get (h, t.v, p, a[j], mi, idx (j), cbf, arg))
-	    return 0;
-  for (j = i = 0; i < h->ht[NMHT].ncur && j < MINTAB; j++)
-    if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)) && ++i)
-      if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, NULL, NULL))
-	if (likely_equal (p->v, t.v))
-          if (try_get (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, cbf, arg))
-	    return 0;
-  add1 (h->stats.get_nohit);
-  return -1;
+int atomic_hash_get (hmap_t *hmap, const void *kwd, int len, hook_t cb_on_get, void *arg) {
+    MEMWORD union { hv_t v; nid_t d[NKEY]; } t;
+    unsigned long cur_time_in_ms = gettime_in_ms();
+    if (len > 0) {
+        hmap->hash_func (kwd, len, &t);
+    } else if (0 == len) {
+        memcpy (&t, kwd, sizeof(t));
+    } else {
+        return -3; /* key length not defined */
+    }
+
+    MEMWORD nid_t *a[NSEAT];
+    COLLECT_HASH_POS (hmap, t.d, a);
+
+
+    register nid_t mi;
+    register node_t *node;
+    for (register unsigned int j = 0; j < NSEAT; j++) {
+        if ((mi = *a[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi))) {
+            if (valid_ttl (hmap, cur_time_in_ms, node, a[j], mi, IDX (j), NULL, NULL)) {
+                if (likely_equal (node->v, t.v)) {
+                    if (try_get (hmap, t.v, node, a[j], mi, IDX (j), cb_on_get, arg)) {
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+
+    for (register unsigned int j = 0,
+                               i = 0; i < hmap->ht[NMHT].ncur && j < MINTAB; j++) {
+        if ((mi = hmap->ht[NMHT].b[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi)) && ++i) {
+            if (valid_ttl (hmap, cur_time_in_ms, node, &hmap->ht[NMHT].b[j], mi, NMHT, NULL, NULL)) {
+                if (likely_equal (node->v, t.v)) {
+                    if (try_get (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_on_get, arg)) {
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+
+    ADD1 (hmap->stats.get_nohit);
+    return -1;
 }
 
-int
-atomic_hash_del (hash_t *h, void *kwd, int len, hook cbf, void *arg)
-{
-  register unsigned int i, j;
-  register nid mi;
-  register node_t *p;
-  memword nid *a[NSEAT];
-  memword union { hv v; nid d[NKEY]; } t;
-  unsigned long now = nowms ();
+int atomic_hash_del (hmap_t *hmap, const void *kwd, int len, hook_t cb_on_del, void *arg) {
+    MEMWORD union { hv_t v; nid_t d[NKEY]; } t;
+    if (len > 0) {
+        hmap->hash_func (kwd, len, &t);
+    } else if (0 == len) {
+        memcpy (&t, kwd, sizeof(t));
+    } else {
+        return -3; /* key length not defined */
+    }
 
-  if (len > 0)
-    h->hash_func (kwd, len, &t);
-  else if (len == 0)
-    memcpy (&t, kwd, sizeof(t));
-  else
-    return -3; /* key length not defined */
-  collect_hash_pos (t.d, a);
-  i = 0; /* delete all matches */
-  for (j = 0; j < NSEAT; j++)
-    if ((mi = *a[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-      if (valid_ttl (h, now, p, a[j], mi, idx (j), NULL, NULL))
-        if (likely_equal (p->v, t.v))
-          if (try_del (h, t.v, p, a[j], mi, idx (j), cbf, arg))
-            i++;
-  if (h->ht[NMHT].ncur > 0)
-    for (j = 0; j < MINTAB; j++)
-      if ((mi = h->ht[NMHT].b[j]) != NNULL && (p = i2p (h->mp, node_t, mi)))
-        if (valid_ttl (h, now, p, &h->ht[NMHT].b[j], mi, NMHT, NULL, NULL))
-          if (likely_equal (p->v, t.v))
-            if (try_del (h, t.v, p, &h->ht[NMHT].b[j], mi, NMHT, cbf, arg))
-              i++;
-  if (i > 0)
-    return 0;
-  add1 (h->stats.del_nohit);
-  return -1;
+    MEMWORD nid_t *a[NSEAT];
+    COLLECT_HASH_POS (hmap, t.d, a);
+
+
+    register nid_t mi;
+    register node_t *node;
+    unsigned long cur_time_in_ms = gettime_in_ms();
+    register unsigned int del_matches = 0; /* delete all matches */
+    for (register unsigned int j = 0; j < NSEAT; j++) {
+        if ((mi = *a[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi))) {
+            if (valid_ttl (hmap, cur_time_in_ms, node, a[j], mi, IDX (j), NULL, NULL)) {
+                if (likely_equal (node->v, t.v)) {
+                    if (try_del (hmap, t.v, node, a[j], mi, IDX (j), cb_on_del, arg)) {
+                        del_matches++;
+                    }
+                }
+            }
+        }
+    }
+
+    if (hmap->ht[NMHT].ncur > 0) {
+        for (register unsigned int j = 0; j < MINTAB; j++) {
+            if ((mi = hmap->ht[NMHT].b[j]) != NNULL && (node = I2P (hmap->mpool, node_t, mi))) {
+                if (valid_ttl (hmap, cur_time_in_ms, node, &hmap->ht[NMHT].b[j], mi, NMHT, NULL, NULL)) {
+                    if (likely_equal (node->v, t.v)) {
+                        if (try_del (hmap, t.v, node, &hmap->ht[NMHT].b[j], mi, NMHT, cb_on_del, arg)) {
+                            del_matches++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (del_matches > 0) {
+        return 0;
+    }
+
+    ADD1 (hmap->stats.del_nohit);
+    return -1;
+}
+/* -------------------- -------------------- -------------------- -------------------- -------------------- */
+
+
+
+
+/* - Test functions - */
+void (*atomic_hash_debug_get_hash_func(hmap_t *hmap))(const void *key, size_t len, void *r) {
+    return hmap->hash_func;
+}
+
+void *atomic_hash_debug_get_teststr(hmap_t *hmap) {
+    return hmap->teststr;
+}
+
+void atomic_hash_debug_set_teststr(hmap_t *hmap, void *teststr) {
+    hmap->teststr = teststr;
+}
+
+unsigned long atomic_hash_debug_get_teststr_num(hmap_t *hmap) {
+    return hmap->teststr_num;
+}
+
+void atomic_hash_debug_set_teststr_num(hmap_t *hmap, unsigned long teststr_num) {
+    hmap->teststr_num = teststr_num;
 }
