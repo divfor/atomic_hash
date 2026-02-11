@@ -1,0 +1,101 @@
+{
+    "version": 7,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 28,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "__base",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}/",
+            "hidden": true
+        },
+        {
+            "name": "debug",
+            "displayName": "[BUILD] Debug",
+            "inherits": "__base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "[BUILD] Release",
+            "inherits": "__base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "ci",
+            "displayName": "~~GitLab CI~~",
+            "inherits": "debug",
+            "cacheVariables": {
+                "BUILD_DEMO": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "displayName": "[BUILD] Debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "release",
+            "displayName": "[BUILD] Release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "ci",
+            "displayName": "~~GitLab CI~~",
+            "configurePreset": "ci"
+        }
+    ],
+    "workflowPresets": [
+        {
+            "name": "debug",
+            "description": "[BUILD] Debug: Configure + Build",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "debug"
+                },
+                {
+                    "type": "build",
+                    "name": "debug"
+                }
+            ]
+        },
+        {
+            "name": "release",
+            "description": "[BUILD] Release: Configure + Build",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "release"
+                },
+                {
+                    "type": "build",
+                    "name": "release"
+                }
+            ]
+        },
+        {
+            "name": "ci",
+            "description": "CI: Configure + Build",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "ci"
+                },
+                {
+                    "type": "build",
+                    "name": "ci"
+                }
+            ]
+        }
+    ]
+}

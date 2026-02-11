@@ -1,4 +1,5 @@
-#include <stdint.h>
+#include "hash_mpq.h"
+
 
 uint32_t ct[0x500];
 void
@@ -20,12 +21,13 @@ init_crypt_table (uint32_t *ct)
           }
     }
 }
-inline void
+
+void
 mpq3hash (const void *s, const size_t len, void *r)
 {                               /* 1:18889465931478580854784 */
   register uint32_t i, c, x1 = 0x7FED7FED, y1 = 0x7FED7FED, z1 = 0x7FED7FED;
   register uint32_t x2 = 0x7FED7FED, y2 = 0x7FED7FED, z2 = 0x7FED7FED;
-  register unsigned char *k = (unsigned char *) s;
+  register unsigned char *k = (unsigned char*) s;
 //  while ((c = *k++) != '\0')    /*c = toupper (*k++); */
   for (i = 0; i < len; i++)
     {
@@ -37,8 +39,7 @@ mpq3hash (const void *s, const size_t len, void *r)
       z1 = ct[512 + c] ^ (z1 + z2);
       z2 = c + z1 + z2 + (z2 << 5) + 3;
     }
-  ((uint32_t *)r)[0] = x1;
-  ((uint32_t *)r)[1] = y1;
-  ((uint32_t *)r)[2] = z1;
+  ((uint32_t*)r)[0] = x1;
+  ((uint32_t*)r)[1] = y1;
+  ((uint32_t*)r)[2] = z1;
 }
-
